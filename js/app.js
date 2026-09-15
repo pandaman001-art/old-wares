@@ -1,6 +1,9 @@
 // 画面の組み立てとイベント配線。
 
+import { barcodeSupported, describeBarcode, scanBarcode } from "./barcode.js";
 import { drawHistogram, SERIES_VARS } from "./chart.js";
+import { buildQueries, identify } from "./identify.js";
+import { shrinkImage } from "./photo.js";
 import { DEFAULT_GROUPS, quote, searchPageUrl } from "./quote.js";
 import { deleteRecord, getRecord, listRecords, loadDraft, saveDraft, saveRecord } from "./store.js";
 
@@ -12,6 +15,10 @@ const escapeHtml = (s) =>
 let latest = null;
 let sortKey = "price";
 let sortDir = 1;
+// 商品特定の作業状態。写真は記録用、バーコードとタグ文字が検索語のもとになる
+let photoBlob = null;
+let photoUrl = null;
+let barcodeValue = "";
 
 /* ---------- テーマ ---------- */
 el("theme-toggle").addEventListener("click", () => {
@@ -22,6 +29,118 @@ el("theme-toggle").addEventListener("click", () => {
   root.setAttribute("data-theme", dark ? "light" : "dark");
   if (latest) drawHistogram(latest, el("hist"), el("tip"), el("legend"));
 });
+
+/* ---------- 1. 商品を特定する ---------- */
+const TAG_SAMPLE = `THE NORTH FACE
+ND91841
+ヌプシ ジャケット
+SIZE: L
+表地 ナイロン100%
+中わた ダウン90%
+MADE IN CHINA`;
+
+el("photo-pick").addEventListener("click", () => el("photo").click());
+
+el("photo").addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  photoBlob = await shrinkImage(file);
+  showPhoto();
+  event.target.value = "";   // 同じ写真をもう一度選べるようにする
+});
+
+el("photo-clear").addEventListener("click", () => {
+  photoBlob = null;
+  showPhoto();
+});
+
+function showPhoto() {
+  if (photoUrl) URL.revokeObjectURL(photoUrl);
+  photoUrl = photoBlob ? URL.createObjectURL(photoBlob) : null;
+  const preview = el("photo-preview");
+  preview.src = photoUrl || "";
+  preview.hidden = !photoBlob;
+  el("photo-hint").hidden = !photoBlob;
+  el("photo-clear").hidden = !photoBlob;
+}
+
+// バーコード読み取りは対応端末でだけ出す（iOS の Safari には標準機能が無い）
+if (barcodeSupported()) el("scan").hidden = false;
+
+let scanController = null;
+el("scan").addEventListener("click", async () => {
+  const scanner = el("scanner");
+  scanner.hidden = false;
+  scanController = new AbortController();
+  try {
+    const raw = await scanBarcode({ video: el("scan-video"), signal: scanController.signal });
+    barcodeValue = raw;
+    const info = describeBarcode(raw);
+    el("barcode-status").className = "status ok";
+    el("barcode-status").textContent =
+      `バーコード ${info.code}（${info.kind}${info.country ? " / " + info.country : ""}` +
+      `${info.valid ? "" : " / チェックディジットが合いません"}）`;
+    runIdentify();
+  } catch (error) {
+    el("barcode-status").className = "status";
+    el("barcode-status").textContent = /中止/.test(error.message) ? "" : error.message;
+  } finally {
+    scanner.hidden = true;
+    scanController = null;
+  }
+});
+
+el("scan-cancel").addEventListener("click", () => scanController?.abort());
+
+el("identify-sample").addEventListener("click", () => {
+  el("tag-text").value = TAG_SAMPLE;
+  runIdentify();
+});
+
+el("identify").addEventListener("click", runIdentify);
+
+function runIdentify() {
+  const tagText = el("tag-text").value;
+  if (!tagText.trim() && !barcodeValue) {
+    showMessages(["タグに書かれている文字を入れるか、バーコードを読み取ってください。"]);
+    return;
+  }
+  showMessages([]);
+  const found = identify(tagText);
+  const queries = buildQueries(found, { barcode: barcodeValue, note: el("q").value });
+
+  const chips = [
+    ["ブランド", found.brand ? found.brand.canonical : null],
+    ["品番", found.modelNumbers.join(" / ")],
+    ["サイズ", found.sizes.join(" / ")],
+    ["産地", found.madeIn],
+    ["素材", found.materials.join(" / ")],
+    ["バーコード", barcodeValue],
+  ].filter(([, value]) => value);
+
+  el("chips").innerHTML = chips.length
+    ? chips.map(([k, v]) => `<span class="chip"><span class="k">${k}</span><b>${escapeHtml(v)}</b></span>`).join("")
+    : `<span class="muted" style="font-size:13px">ブランドや品番は読み取れませんでした。書かれている言葉をそのまま検索語に使います。</span>`;
+
+  el("queries").innerHTML = queries.length
+    ? queries
+        .map(
+          (q) => `<button type="button" data-query="${escapeHtml(q.query)}">
+            <span class="qtext">${escapeHtml(q.query)}</span><span class="qlabel">${escapeHtml(q.label)}</span>
+          </button>`
+        )
+        .join("")
+    : `<span class="muted" style="font-size:13px">検索語を作れませんでした。</span>`;
+
+  document.querySelectorAll("[data-query]").forEach((button) =>
+    button.addEventListener("click", () => {
+      el("q").value = button.dataset.query;
+      persistDraft();
+      el("q").scrollIntoView({ behavior: "smooth", block: "center" });
+    })
+  );
+  el("identify-result").hidden = false;
+}
 
 /* ---------- 入力欄 ---------- */
 const canPaste = typeof navigator.clipboard?.readText === "function";
@@ -91,6 +210,8 @@ async function pasteInto(key) {
 function persistDraft() {
   saveDraft({
     q: el("q").value,
+    tagText: el("tag-text").value,
+    barcode: barcodeValue,
     texts: Object.fromEntries(DEFAULT_GROUPS.map((g) => [g.key, el("text-" + g.key).value])),
   });
 }
@@ -99,6 +220,8 @@ function restoreDraft() {
   const draft = loadDraft();
   if (!draft) return;
   el("q").value = draft.q || "";
+  el("tag-text").value = draft.tagText || "";
+  barcodeValue = draft.barcode || "";
   for (const g of DEFAULT_GROUPS) {
     const area = el("text-" + g.key);
     if (area && draft.texts?.[g.key]) {
@@ -148,6 +271,12 @@ el("clear").addEventListener("click", () => {
     el("status-" + g.key).textContent = "";
   }
   latest = null;
+  barcodeValue = "";
+  photoBlob = null;
+  showPhoto();
+  el("tag-text").value = "";
+  el("barcode-status").textContent = "";
+  el("identify-result").hidden = true;
   for (const id of ["summary", "source-cards", "chart-card", "table-card"]) el(id).hidden = true;
   showMessages([]);
   persistDraft();
@@ -314,6 +443,9 @@ el("save").addEventListener("click", async () => {
     await saveRecord({
       query: latest.query,
       groups: currentGroups(),
+      photo: photoBlob,
+      tagText: el("tag-text").value,
+      barcode: barcodeValue,
       summary: {
         blend: latest.blend,
         combined: latest.combined,
@@ -338,6 +470,7 @@ async function refreshRecords() {
   el("records").innerHTML = records
     .map(
       (r) => `<li>
+      ${r.photo ? `<img class="thumb" src="${URL.createObjectURL(r.photo)}" alt="">` : ""}
       <span class="q">${escapeHtml(r.query || "(名前なし)")}</span>
       <span class="val">${yen(r.summary?.blend?.equalWeightMedian)}</span>
       <span class="when">${new Date(r.createdAt).toLocaleString("ja-JP")}</span>
@@ -355,6 +488,10 @@ async function openRecord(id) {
   const record = await getRecord(id);
   if (!record) return showMessages(["保存した調査を開けませんでした。"]);
   el("q").value = record.query || "";
+  el("tag-text").value = record.tagText || "";
+  barcodeValue = record.barcode || "";
+  photoBlob = record.photo || null;
+  showPhoto();
   for (const g of DEFAULT_GROUPS) el("text-" + g.key).value = "";
   for (const g of record.groups || []) {
     const area = el("text-" + g.key);
@@ -384,6 +521,7 @@ window.addEventListener("resize", () => {
 /* ---------- 起動 ---------- */
 renderPanes();
 restoreDraft();
+showPhoto();
 el("q").addEventListener("input", persistDraft);
 refreshRecords();
 

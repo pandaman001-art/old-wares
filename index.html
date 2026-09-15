@@ -126,6 +126,34 @@
   .pane .status.ok { color: var(--good); }
   .pane .status.bad { color: var(--critical); }
 
+  /* 商品を特定するカード */
+  .identify-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .identify-grid textarea { min-height: 120px; }
+  #photo-preview { display: block; width: 100%; max-width: 260px; border-radius: 8px; border: 1px solid var(--border); margin-top: 8px; }
+  .hint { font-size: 12px; margin: 6px 0 0; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip { display: inline-flex; align-items: baseline; gap: 6px; font-size: 13px;
+    border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; background: var(--plane); }
+  .chip b { font-weight: 600; }
+  .chip .k { font-size: 11px; color: var(--text-secondary); }
+  .queries { display: flex; flex-direction: column; gap: 6px; }
+  .queries button {
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; width: 100%; text-align: left;
+    background: transparent; color: var(--text-primary); border: 1px solid var(--axis); font-weight: 500;
+  }
+  .queries button .qtext { font-weight: 600; }
+  .queries button .qlabel { font-size: 12px; color: var(--text-secondary); }
+  .queries button:first-child { border-color: var(--series-yahoo); }
+
+  /* バーコード読み取りのカメラ画面 */
+  .scanner {
+    position: fixed; inset: 0; z-index: 50; background: #000;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+  .scanner video { width: 100%; max-width: 560px; border-radius: 10px; background: #111; }
+  .scanner p { color: #fff; font-size: 13px; margin: 0; }
+
   .headline { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-end; }
   .hero-label { font-size: 12px; color: var(--text-secondary); letter-spacing: .04em; }
   .hero-value { font-size: 40px; font-weight: 650; line-height: 1.1; letter-spacing: -.01em; }
@@ -175,6 +203,7 @@
   .records .q { font-weight: 600; }
   .records .when { color: var(--text-muted); font-size: 12px; }
   .records .val { font-variant-numeric: tabular-nums; }
+  .records .thumb { width: 36px; height: 36px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); flex: none; }
 
   .banner { border-left: 3px solid var(--warning); padding: 8px 12px; font-size: 13px; color: var(--text-secondary); }
   .muted { color: var(--text-secondary); }
@@ -192,9 +221,50 @@
     <button type="button" class="ghost small" id="theme-toggle" aria-label="表示テーマを切り替える">◐ テーマ</button>
   </header>
 
+  <section class="card" id="identify-card">
+    <div class="chart-head">
+      <h2>1. 商品を特定する</h2>
+      <span class="spacer"></span>
+      <span class="muted" style="font-size:12px">タグの文字とバーコードから検索語を組み立てます</span>
+    </div>
+
+    <div class="identify-grid">
+      <div>
+        <div class="pane-actions">
+          <button type="button" class="ghost small" id="photo-pick">写真を撮る / 選ぶ</button>
+          <button type="button" class="ghost small" id="scan" hidden>バーコードを読む</button>
+          <button type="button" class="ghost small" id="photo-clear" hidden>写真を外す</button>
+        </div>
+        <input type="file" id="photo" accept="image/*" capture="environment" hidden>
+        <img id="photo-preview" alt="取り込んだ写真" hidden>
+        <p class="muted hint" id="photo-hint" hidden>写真は記録用です。画像から自動で商品名は判別しません。</p>
+        <div class="status" id="barcode-status"></div>
+      </div>
+      <div>
+        <label class="field" style="width:100%">タグに書かれている文字
+          <textarea id="tag-text" placeholder="ブランド名・品番・サイズなどをタグを見たまま入力（改行して構いません）"
+            autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+        </label>
+        <div class="pane-actions" style="margin-top:8px">
+          <button type="button" id="identify">検索語を作る</button>
+          <button type="button" class="ghost small" id="identify-sample">例を入れる</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="identify-result" hidden>
+      <div class="chips" id="chips"></div>
+      <p class="muted" style="font-size:12px;margin:12px 0 6px">
+        検索語の候補（上ほど絞り込みが強い）。タップすると下の検索語に入ります。0 件だったら下の候補へ。
+      </p>
+      <div class="queries" id="queries"></div>
+    </div>
+  </section>
+
   <section class="card">
+    <div class="chart-head"><h2>2. 相場を調べる</h2></div>
     <ol class="steps">
-      <li>調べたい服の名前を入れる</li>
+      <li>調べたい服の名前を入れる（上で候補を作れます）</li>
       <li>「検索ページを開く」から検索結果を開く（<strong>売れたものだけ</strong>が出るリンクです）</li>
       <li>一覧を選択してコピーし、下の枠に貼り付ける</li>
       <li>「相場を計算」を押す</li>
@@ -288,6 +358,12 @@
     このアプリは端末の中だけで動きます。外部サイトへ自動アクセスせず、入力した内容もどこにも送信しません。
     金額はいずれも実際に売れた価格（ヤフオク＝落札価格 / メルカリ＝売り切れ価格）です。送料の扱いは出品ごとに異なります。
   </footer>
+</div>
+
+<div class="scanner" id="scanner" hidden>
+  <video id="scan-video" playsinline muted></video>
+  <p>バーコードを画面に収めてください</p>
+  <button type="button" class="ghost" id="scan-cancel">やめる</button>
 </div>
 
 <script type="module" src="./js/app.js"></script>
