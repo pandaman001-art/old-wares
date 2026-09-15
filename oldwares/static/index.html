@@ -1,0 +1,604 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>old-wares — 中古服の相場</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%232a78d6'/%3E%3Crect x='3' y='9' width='2.6' height='5' fill='white'/%3E%3Crect x='6.7' y='5' width='2.6' height='9' fill='white'/%3E%3Crect x='10.4' y='7' width='2.6' height='7' fill='%23eb6834'/%3E%3C/svg%3E">
+<style>
+  :root {
+    color-scheme: light;
+    --plane:          #f9f9f7;
+    --surface-1:      #fcfcfb;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --grid:           #e1e0d9;
+    --axis:           #c3c2b7;
+    --border:         rgba(11, 11, 11, 0.10);
+    --series-yahoo:   #2a78d6;
+    --series-mercari: #eb6834;
+    --critical:       #d03b3b;
+    --warning:        #fab219;
+    --field-bg:       #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --plane:          #0d0d0d;
+      --surface-1:      #1a1a19;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --grid:           #2c2c2a;
+      --axis:           #383835;
+      --border:         rgba(255, 255, 255, 0.10);
+      --series-yahoo:   #3987e5;
+      --series-mercari: #d95926;
+      --critical:       #d03b3b;
+      --field-bg:       #111110;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --plane:          #0d0d0d;
+    --surface-1:      #1a1a19;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --grid:           #2c2c2a;
+    --axis:           #383835;
+    --border:         rgba(255, 255, 255, 0.10);
+    --series-yahoo:   #3987e5;
+    --series-mercari: #d95926;
+    --critical:       #d03b3b;
+    --field-bg:       #111110;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--plane);
+    color: var(--text-primary);
+    font: 14px/1.6 system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 24px 16px 64px; }
+
+  header.top { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  header.top h1 { font-size: 20px; margin: 0; letter-spacing: .01em; }
+  header.top p { margin: 0; color: var(--text-secondary); font-size: 13px; }
+  .spacer { flex: 1 1 auto; }
+
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .card + .card { margin-top: 16px; }
+
+  /* --- search form --- */
+  form.search { display: grid; gap: 12px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row.grow > input[type=text] { flex: 1 1 320px; min-width: 0; }
+  label.field { display: inline-flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+  input[type=text], input[type=number], select {
+    font: inherit; color: var(--text-primary); background: var(--field-bg);
+    border: 1px solid var(--axis); border-radius: 8px; padding: 9px 11px;
+  }
+  input[type=number] { width: 112px; }
+  input:focus-visible, button:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--series-yahoo); outline-offset: 2px;
+  }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer;
+    border-radius: 8px; padding: 9px 18px;
+    border: 1px solid var(--series-yahoo); background: var(--series-yahoo); color: #fff;
+  }
+  button.ghost { background: transparent; color: var(--text-primary); border-color: var(--axis); font-weight: 500; }
+  button[disabled] { opacity: .55; cursor: progress; }
+  .checks { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); }
+  .checks label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  details.adv summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; }
+  details.adv[open] summary { margin-bottom: 10px; }
+
+  /* --- headline --- */
+  .headline { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-end; }
+  .hero-label { font-size: 12px; color: var(--text-secondary); letter-spacing: .04em; }
+  .hero-value { font-size: 40px; font-weight: 650; line-height: 1.1; letter-spacing: -.01em; }
+  .hero-sub { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+  .tiles { display: flex; gap: 24px; flex-wrap: wrap; }
+  .tile .k { font-size: 12px; color: var(--text-secondary); }
+  .tile .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* --- source cards --- */
+  .sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+  .src { border: 1px solid var(--border); border-radius: 10px; padding: 13px 14px; }
+  .src h3 { margin: 0 0 8px; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .src dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 13px; }
+  .src dt { color: var(--text-secondary); }
+  .src dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .src .note { margin-top: 8px; font-size: 12px; color: var(--text-secondary); }
+  .src .note a { color: var(--series-yahoo); }
+  .src.failed { border-color: var(--critical); }
+  .src .err { margin-top: 8px; font-size: 12px; color: var(--critical); }
+
+  /* --- chart --- */
+  .chart-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+  .chart-head h2 { font-size: 15px; margin: 0; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--text-secondary); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .chart-box { position: relative; }
+  svg.hist { display: block; width: 100%; height: auto; }
+  .tip {
+    position: absolute; pointer-events: none; opacity: 0; transition: opacity .09s;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 10px; font-size: 12px; min-width: 150px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.14); z-index: 5;
+  }
+  .tip b { font-size: 12.5px; }
+  .tip .line { display: flex; justify-content: space-between; gap: 14px; margin-top: 3px; color: var(--text-secondary); }
+  .tip .line em { font-style: normal; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+
+  /* --- table --- */
+  .table-scroll { overflow: auto; max-height: 440px; }
+  .table-scroll thead th { position: sticky; top: 0; background: var(--surface-1); z-index: 1; }
+  .table-scroll thead th::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0;
+    height: 1px; background: var(--axis); }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { padding: 7px 10px; text-align: left; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  th { color: var(--text-secondary); font-weight: 600; cursor: pointer; user-select: none; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.title { white-space: normal; min-width: 260px; }
+  tr.out td { color: var(--text-muted); }
+  td a { color: var(--series-yahoo); }
+  .tag { font-size: 11px; border: 1px solid var(--axis); border-radius: 999px; padding: 1px 7px; color: var(--text-secondary); }
+
+  .banner { border-left: 3px solid var(--warning); padding: 8px 12px; font-size: 13px; color: var(--text-secondary); }
+  .banner + .banner { margin-top: 6px; }
+  .muted { color: var(--text-secondary); }
+  footer.note { margin-top: 24px; font-size: 12px; color: var(--text-muted); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <h1>old-wares</h1>
+    <p>ヤフオクとメルカリの<strong>実売価格</strong>から中古服の相場を出す</p>
+    <span class="spacer"></span>
+    <button type="button" class="ghost" id="theme-toggle" aria-label="表示テーマを切り替える">◐ テーマ</button>
+  </header>
+
+  <section class="card">
+    <form class="search" id="form">
+      <div class="row grow">
+        <input type="text" id="q" name="q" placeholder="例: ノースフェイス ヌプシ 700 ダウン" autocomplete="off" required>
+        <button type="submit" id="submit">相場を調べる</button>
+      </div>
+      <div class="checks" id="source-picker"></div>
+      <details class="adv">
+        <summary>詳細設定</summary>
+        <div class="row">
+          <label class="field">取得件数/サイト
+            <input type="number" id="limit" value="120" min="10" max="480" step="10">
+          </label>
+          <label class="field">下限価格
+            <input type="number" id="price_min" placeholder="指定なし" min="0" step="100">
+          </label>
+          <label class="field">上限価格
+            <input type="number" id="price_max" placeholder="指定なし" min="0" step="100">
+          </label>
+          <label class="field" style="flex:1 1 220px">除外語（カンマ区切り）
+            <input type="text" id="exclude" placeholder="例: ジュニア, 海外製">
+          </label>
+        </div>
+        <div class="checks" style="margin-top:10px">
+          <label><input type="checkbox" id="default_excludes" checked> まとめ売り・ジャンク等を自動除外</label>
+          <label><input type="checkbox" id="remove_outliers" checked> 外れ値（IQR）を除外</label>
+          <label><input type="checkbox" id="fresh"> キャッシュを使わない</label>
+        </div>
+      </details>
+    </form>
+  </section>
+
+  <div id="messages" hidden></div>
+
+  <section class="card" id="summary" hidden>
+    <div class="headline">
+      <div>
+        <div class="hero-label">相場（両サイトの中央値の平均）</div>
+        <div class="hero-value" id="hero">—</div>
+        <div class="hero-sub" id="hero-sub"></div>
+      </div>
+      <div class="tiles" id="tiles"></div>
+    </div>
+  </section>
+
+  <section class="card" id="source-cards" hidden>
+    <div class="sources" id="sources"></div>
+  </section>
+
+  <section class="card" id="chart-card" hidden>
+    <div class="chart-head">
+      <h2>価格分布</h2>
+      <span class="spacer"></span>
+      <div class="legend" id="legend"></div>
+    </div>
+    <div class="chart-box">
+      <svg class="hist" id="hist" role="img" aria-label="取得元ごとの価格分布ヒストグラム"></svg>
+      <div class="tip" id="tip" role="status"></div>
+    </div>
+  </section>
+
+  <section class="card" id="table-card" hidden>
+    <div class="chart-head">
+      <h2>取得した実売データ</h2>
+      <span class="spacer"></span>
+      <label class="muted" style="font-size:13px"><input type="checkbox" id="show-excluded"> 除外分も表示</label>
+      <a id="csv" class="muted" href="#" style="font-size:13px">CSV ダウンロード</a>
+    </div>
+    <div class="table-scroll">
+      <table id="table">
+        <thead><tr>
+          <th data-sort="source">取得元</th>
+          <th data-sort="title">タイトル</th>
+          <th data-sort="price" class="num">価格</th>
+          <th data-sort="sold_at">売却日</th>
+          <th data-sort="condition">状態</th>
+          <th>リンク</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="muted" id="table-note" style="font-size:12px"></p>
+  </section>
+
+  <footer class="note">
+    価格はいずれも実際に売れた金額（ヤフオク＝落札価格 / メルカリ＝売り切れ価格）です。送料の扱いは出品ごとに異なります。
+  </footer>
+</div>
+
+<script>
+const yen = n => (n === null || n === undefined) ? "—" : "¥" + Number(n).toLocaleString("ja-JP");
+const shortYen = n => {
+  if (n === null || n === undefined) return "";
+  if (Math.abs(n) >= 10000) {
+    const man = n / 10000;
+    return (man >= 10 ? Math.round(man) : Math.round(man * 10) / 10) + "万";
+  }
+  return Number(n).toLocaleString("ja-JP");
+};
+const el = id => document.getElementById(id);
+const SERIES_VARS = ["--series-yahoo", "--series-mercari"];
+let latest = null;
+let sortKey = "price", sortDir = 1;
+
+/* ---------- theme ---------- */
+el("theme-toggle").addEventListener("click", () => {
+  const root = document.documentElement;
+  const dark = root.getAttribute("data-theme") === "dark" ||
+    (!root.hasAttribute("data-theme") && matchMedia("(prefers-color-scheme: dark)").matches);
+  root.setAttribute("data-theme", dark ? "light" : "dark");
+  if (latest) drawHistogram(latest);
+});
+
+/* ---------- sources ---------- */
+async function loadSources() {
+  const res = await fetch("/api/sources");
+  const data = await res.json();
+  el("source-picker").innerHTML = data.sources.map(s => `
+    <label title="${s.kind === "demo" ? "ネットワーク不要のデモデータ" : "実サイトから取得"}">
+      <input type="checkbox" name="source" value="${s.key}" ${data.default.includes(s.key) ? "checked" : ""}>
+      ${s.label}${s.kind === "demo" ? " <span class='tag'>demo</span>" : ""}
+    </label>`).join("");
+}
+
+function selectedSources() {
+  return [...document.querySelectorAll("input[name=source]:checked")].map(i => i.value);
+}
+
+function queryParams() {
+  const p = new URLSearchParams();
+  p.set("q", el("q").value.trim());
+  const sources = selectedSources();
+  if (sources.length) p.set("sources", sources.join(","));
+  p.set("limit", el("limit").value || 120);
+  if (el("price_min").value) p.set("price_min", el("price_min").value);
+  if (el("price_max").value) p.set("price_max", el("price_max").value);
+  if (el("exclude").value.trim()) p.set("exclude", el("exclude").value.trim());
+  p.set("default_excludes", el("default_excludes").checked);
+  p.set("remove_outliers", el("remove_outliers").checked);
+  if (el("fresh").checked) p.set("fresh", "true");
+  return p;
+}
+
+/* ---------- search ---------- */
+el("form").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  if (!el("q").value.trim()) return;
+  if (!selectedSources().length) return showMessages(["取得元を 1 つ以上選んでください。"]);
+  const button = el("submit");
+  button.disabled = true;
+  button.textContent = "取得中…";
+  showMessages([]);
+  try {
+    const params = queryParams();
+    const res = await fetch("/api/search?" + params);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    latest = data;
+    el("csv").href = "/api/export.csv?" + params;
+    render(data);
+    history.replaceState(null, "", "?" + params);
+  } catch (err) {
+    showMessages(["検索に失敗しました: " + err.message]);
+  } finally {
+    button.disabled = false;
+    button.textContent = "相場を調べる";
+  }
+});
+
+function showMessages(list) {
+  const box = el("messages");
+  box.innerHTML = list.map(m => `<div class="card banner">${escapeHtml(m)}</div>`).join("");
+  box.hidden = list.length === 0;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/* ---------- render ---------- */
+function render(data) {
+  showMessages(data.warnings || []);
+  const combined = data.combined || { count: 0 };
+  const blend = data.blend || {};
+  const has = combined.count > 0;
+
+  el("summary").hidden = !has;
+  el("chart-card").hidden = !has;
+  el("source-cards").hidden = false;
+  el("table-card").hidden = !data.sources.some(s => s.listings.length);
+
+  if (has) {
+    el("hero").textContent = yen(blend.equal_weight_median ?? combined.median);
+    el("hero-sub").textContent =
+      `よくある価格帯 ${yen(combined.p25)} 〜 ${yen(combined.p75)}（全 ${combined.count} 件の中央 50%）`;
+    el("tiles").innerHTML = [
+      ["全件の中央値", yen(combined.median)],
+      ["全件の平均", yen(blend.weighted_mean ?? combined.mean)],
+      ["有効データ", combined.count + " 件"],
+      ["最安 / 最高", `${yen(combined.min)} / ${yen(combined.max)}`],
+    ].map(([k, v]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+  }
+
+  renderSources(data);
+  if (has) drawHistogram(data);
+  renderTable(data);
+}
+
+function seriesVar(index) { return SERIES_VARS[index % SERIES_VARS.length]; }
+
+function renderSources(data) {
+  el("sources").innerHTML = data.sources.map((s, i) => {
+    const st = s.stats || { count: 0 };
+    const head = `<h3><span class="swatch" style="background:var(${seriesVar(i)})"></span>${escapeHtml(s.label)}
+      ${s.cached ? '<span class="tag">キャッシュ</span>' : ""}</h3>`;
+    if (!s.ok) {
+      return `<div class="src failed">${head}<div class="err">取得できませんでした<br>${escapeHtml(s.error || "")}</div></div>`;
+    }
+    const link = s.search_url
+      ? `<div class="note"><a href="${escapeHtml(s.search_url)}" target="_blank" rel="noopener">サイトで元データを見る ↗</a></div>` : "";
+    return `<div class="src">${head}
+      <dl>
+        <dt>中央値</dt><dd>${yen(st.median)}</dd>
+        <dt>平均</dt><dd>${yen(st.mean)}</dd>
+        <dt>価格帯 (25–75%)</dt><dd>${yen(st.p25)} 〜 ${yen(st.p75)}</dd>
+        <dt>有効 / 取得</dt><dd>${st.count} / ${s.fetched_count} 件</dd>
+      </dl>
+      <div class="note">除外 ${s.excluded_count - s.outlier_count} 件・外れ値 ${s.outlier_count} 件${s.elapsed_ms > 50 ? ` ・ ${(s.elapsed_ms / 1000).toFixed(1)}秒` : ""}</div>
+      ${link}</div>`;
+  }).join("");
+}
+
+/* ---------- histogram ---------- */
+function drawHistogram(data) {
+  const h = data.histogram;
+  const svg = el("hist");
+  const tip = el("tip");
+  svg.innerHTML = "";
+  if (!h || !h.edges.length) return;
+
+  const css = getComputedStyle(document.documentElement);
+  const colors = h.series.map((_, i) => css.getPropertyValue(seriesVar(i)).trim());
+  el("legend").innerHTML = h.series.map((name, i) =>
+    `<span><span class="swatch" style="background:${colors[i]}"></span>${escapeHtml(name)}</span>`).join("");
+
+  const W = 900, H = 320;
+  const pad = { top: 16, right: 12, bottom: 44, left: 44 };
+  const plotW = W - pad.left - pad.right;
+  const plotH = H - pad.top - pad.bottom;
+  const bins = h.counts.length;
+  const totals = h.counts.map(row => row.reduce((a, b) => a + b, 0));
+  const maxTotal = Math.max(1, ...totals);
+  const yMax = niceCeil(maxTotal);
+  const slot = plotW / bins;
+  const barW = Math.max(3, Math.min(slot * 0.72, 44));
+  const GAP = 2;            // 積み上げセグメント間の余白（枠線ではなく隙間で分ける）
+  const RADIUS = 4;         // データ端の丸み
+
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const ns = "http://www.w3.org/2000/svg";
+  const add = (tag, attrs, parent = svg) => {
+    const node = document.createElementNS(ns, tag);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+    parent.appendChild(node);
+    return node;
+  };
+  const y = v => pad.top + plotH - (v / yMax) * plotH;
+
+  // grid + y axis
+  const ticks = 4;
+  for (let i = 0; i <= ticks; i++) {
+    const value = Math.round((yMax / ticks) * i);
+    add("line", {
+      x1: pad.left, x2: W - pad.right, y1: y(value), y2: y(value),
+      stroke: i === 0 ? css.getPropertyValue("--axis").trim() : css.getPropertyValue("--grid").trim(),
+      "stroke-width": 1,
+    });
+    add("text", {
+      x: pad.left - 8, y: y(value) + 4, "text-anchor": "end",
+      fill: css.getPropertyValue("--text-muted").trim(), "font-size": 11,
+    }).textContent = value;
+  }
+  add("text", {
+    x: pad.left - 8, y: pad.top - 4, "text-anchor": "end",
+    fill: css.getPropertyValue("--text-muted").trim(), "font-size": 11,
+  }).textContent = "件数";
+
+  // bars
+  for (let b = 0; b < bins; b++) {
+    const x = pad.left + slot * b + (slot - barW) / 2;
+    let cursor = y(0);
+    const lastFilled = h.counts[b].reduce((acc, c, i) => (c > 0 ? i : acc), -1);
+    h.counts[b].forEach((count, s) => {
+      if (count <= 0) return;
+      const full = (count / yMax) * plotH;
+      const top = cursor - full;
+      // 上に積まれるセグメントとの間に隙間を作る（枠線では区切らない）
+      const isTop = s === lastFilled;
+      const y0 = isTop ? top : top + GAP;
+      const height = Math.max(1, isTop ? full : full - GAP);
+      add("path", {
+        d: roundedTop(x, y0, barW, height, isTop ? RADIUS : 0),
+        fill: colors[s],
+      });
+      cursor = top;
+    });
+  }
+
+  // x axis labels（ビンの下端。混み合うときは間引く）
+  const every = Math.ceil(bins / 8);
+  for (let b = 0; b <= bins; b++) {
+    if (b % every !== 0 && b !== bins) continue;
+    // 末尾ラベルが直前のラベルと詰まる場合は省く
+    if (b === bins && bins % every !== 0 && bins % every < every / 2) continue;
+    add("text", {
+      x: pad.left + slot * b, y: H - pad.bottom + 18, "text-anchor": "middle",
+      fill: css.getPropertyValue("--text-muted").trim(), "font-size": 11,
+    }).textContent = shortYen(h.edges[b]);
+  }
+  add("text", {
+    x: W - pad.right, y: H - 8, "text-anchor": "end",
+    fill: css.getPropertyValue("--text-muted").trim(), "font-size": 11,
+  }).textContent = "落札・売却価格";
+
+  // 相場のマーカー（直接ラベルはこの 1 本だけに絞る）
+  const marker = data.blend?.equal_weight_median ?? data.combined?.median;
+  const span = h.edges[h.edges.length - 1] - h.edges[0];
+  if (marker && span > 0) {
+    const mx = pad.left + ((marker - h.edges[0]) / span) * plotW;
+    if (mx >= pad.left && mx <= W - pad.right) {
+      add("line", {
+        x1: mx, x2: mx, y1: pad.top, y2: pad.top + plotH,
+        stroke: css.getPropertyValue("--text-secondary").trim(),
+        "stroke-width": 2, "stroke-linecap": "round",
+      });
+      const label = add("text", {
+        x: Math.min(mx + 6, W - pad.right - 4), y: pad.top + 12,
+        "text-anchor": mx > W - 140 ? "end" : "start",
+        fill: css.getPropertyValue("--text-primary").trim(), "font-size": 12, "font-weight": 600,
+      });
+      label.textContent = "相場 " + yen(marker);
+    }
+  }
+
+  // hover
+  for (let b = 0; b < bins; b++) {
+    const hit = add("rect", {
+      x: pad.left + slot * b, y: pad.top, width: slot, height: plotH,
+      fill: "transparent", style: "cursor:crosshair",
+    });
+    hit.addEventListener("mouseenter", () => {
+      const lines = h.series.map((name, s) =>
+        `<div class="line"><span>${escapeHtml(name)}</span><em>${h.counts[b][s]} 件</em></div>`).join("");
+      tip.innerHTML = `<b>${yen(h.edges[b])} 〜 ${yen(h.edges[b + 1])}</b>${lines}
+        <div class="line"><span>合計</span><em>${totals[b]} 件</em></div>`;
+      tip.style.opacity = "1";
+    });
+    hit.addEventListener("mousemove", ev => {
+      const box = svg.getBoundingClientRect();
+      const x = ev.clientX - box.left;
+      tip.style.left = Math.min(Math.max(8, x + 14), box.width - tip.offsetWidth - 8) + "px";
+      tip.style.top = Math.max(8, ev.clientY - box.top - 10) + "px";
+    });
+    hit.addEventListener("mouseleave", () => { tip.style.opacity = "0"; });
+  }
+}
+
+function roundedTop(x, y, w, h, r) {
+  r = Math.min(r, w / 2, h);
+  return `M${x},${y + h}L${x},${y + r}Q${x},${y} ${x + r},${y}L${x + w - r},${y}Q${x + w},${y} ${x + w},${y + r}L${x + w},${y + h}Z`;
+}
+
+function niceCeil(value) {
+  const exp = Math.pow(10, Math.floor(Math.log10(value)));
+  for (const m of [1, 2, 2.5, 5, 10]) if (m * exp >= value) return m * exp;
+  return 10 * exp;
+}
+
+/* ---------- table ---------- */
+function renderTable(data) {
+  const showExcluded = el("show-excluded").checked;
+  const labels = Object.fromEntries(data.sources.map(s => [s.source, s.label]));
+  let rows = data.sources.flatMap(s => s.listings.map(x => ({ ...x, label: labels[s.source] })));
+  if (!showExcluded) rows = rows.filter(x => !x.excluded);
+  rows.sort((a, b) => {
+    const av = a[sortKey] ?? "", bv = b[sortKey] ?? "";
+    return (av > bv ? 1 : av < bv ? -1 : 0) * sortDir;
+  });
+  document.querySelector("#table tbody").innerHTML = rows.slice(0, 500).map(x => `
+    <tr class="${x.excluded ? "out" : ""}">
+      <td>${escapeHtml(x.label || x.source)}</td>
+      <td class="title">${escapeHtml(x.title)}${x.excluded ? ` <span class="tag">${escapeHtml(x.exclude_reason || "除外")}</span>` : ""}</td>
+      <td class="num">${yen(x.price)}</td>
+      <td>${x.sold_at || "—"}</td>
+      <td>${escapeHtml(x.condition || "—")}</td>
+      <td>${x.url ? `<a href="${escapeHtml(x.url)}" target="_blank" rel="noopener">開く ↗</a>` : "—"}</td>
+    </tr>`).join("");
+  el("table-note").textContent =
+    `${rows.length} 件を表示${rows.length > 500 ? "（先頭 500 件まで）" : ""}。灰色の行は統計から除外した出品です。`;
+}
+
+el("show-excluded").addEventListener("change", () => latest && renderTable(latest));
+document.querySelectorAll("#table th[data-sort]").forEach(th => {
+  th.addEventListener("click", () => {
+    const key = th.dataset.sort;
+    sortDir = key === sortKey ? -sortDir : 1;
+    sortKey = key;
+    if (latest) renderTable(latest);
+  });
+});
+
+/* ---------- boot ---------- */
+(async function boot() {
+  await loadSources();
+  const params = new URLSearchParams(location.search);
+  if (params.get("q")) {
+    el("q").value = params.get("q");
+    if (params.get("sources")) {
+      const wanted = params.get("sources").split(",");
+      document.querySelectorAll("input[name=source]").forEach(i => { i.checked = wanted.includes(i.value); });
+    }
+    for (const [id, key] of [["limit", "limit"], ["price_min", "price_min"], ["price_max", "price_max"], ["exclude", "exclude"]]) {
+      if (params.get(key)) el(id).value = params.get(key);
+    }
+    el("form").requestSubmit();
+  }
+})();
+</script>
+</body>
+</html>
