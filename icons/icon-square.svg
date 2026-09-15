@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="old-wares">
+  <!-- iOS はこの画像に独自の角丸マスクをかけるので、こちらは角を丸めない -->
+  <rect width="512" height="512" fill="#2a78d6"/>
+  <g fill="#ffffff">
+    <rect x="104" y="288" width="68" height="128" rx="16"/>
+    <rect x="222" y="200" width="68" height="216" rx="16"/>
+  </g>
+  <rect x="340" y="136" width="68" height="280" rx="16" fill="#eb6834"/>
+</svg>

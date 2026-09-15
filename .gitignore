@@ -1,11 +1,5 @@
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-.env
-.cache/
-.pytest_cache/
-*.egg-info/
-dist/
-build/
+node_modules/
 .DS_Store
+# ローカル検証用（Playwright など）
+.venv/
+__pycache__/
