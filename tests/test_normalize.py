@@ -3,7 +3,7 @@ from oldwares.models import Listing
 
 
 def listing(title, price=5000):
-    return Listing(source="yahoo", item_id="1", title=title, price=price, url="")
+    return Listing(source="yahoo", item_id="1", title=title, price=price)
 
 
 def test_normalize_text_folds_widths_and_spaces():

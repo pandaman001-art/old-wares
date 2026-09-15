@@ -1,127 +1,113 @@
 import pytest
 
-from oldwares import service
-from oldwares.models import Listing, SourceResult
-from oldwares.service import SearchOptions, search
+from oldwares.parsing import ParsedEntry
+from oldwares.service import InputGroup, QuoteOptions, quote, search_page_url
 
 
-class FakeSource:
-    """build_source を差し替えて、決まった出品リストを返させる。"""
-
-    def __init__(self, key, label, listings=None, error=None):
-        self.key, self.label = key, label
-        self._listings, self._error = listings or [], error
-
-    def collect(self, query, **_):
-        return SourceResult(
-            source=self.key, label=self.label,
-            listings=list(self._listings), error=self._error,
-        )
+def group(key, label, prices, title="ダウンジャケット L"):
+    return InputGroup(key=key, label=label, entries=[ParsedEntry(title, p) for p in prices])
 
 
-def make(source, prices, title="ダウンジャケット L"):
-    return [
-        Listing(source=source, item_id=f"{source}-{i}", title=title, price=p, url="")
-        for i, p in enumerate(prices)
-    ]
+def two_groups(yahoo_prices, mercari_prices, **kw):
+    return [group("yahoo", "ヤフオク", yahoo_prices, **kw), group("mercari", "メルカリ", mercari_prices, **kw)]
 
 
-@pytest.fixture
-def fake_sources(monkeypatch):
-    registry = {}
-
-    def build(key, **_):
-        if key not in registry:
-            raise KeyError(key)
-        return registry[key]
-
-    monkeypatch.setattr(service, "build_source", build)
-    return registry
-
-
-def test_blend_averages_each_sources_median(fake_sources):
-    fake_sources["yahoo"] = FakeSource("yahoo", "ヤフオク", make("yahoo", [1000, 2000, 3000]))
-    fake_sources["mercari"] = FakeSource("mercari", "メルカリ", make("mercari", [5000, 6000, 7000]))
-    result = search("ダウン", SearchOptions(cache_ttl=0))
-
+def test_blend_averages_each_sites_median():
+    result = quote("ダウン", two_groups([1000, 2000, 3000], [5000, 6000, 7000]))
     assert result.blend.equal_weight_median == 4000  # (2000 + 6000) / 2
     assert result.blend.sources_used == ["yahoo", "mercari"]
     assert result.combined.count == 6
-    assert result.combined.median == 4000
 
 
-def test_equal_weight_is_not_swayed_by_sample_size(fake_sources):
+def test_equal_weight_is_not_swayed_by_sample_size():
     """件数の多い側に相場を引っ張られないこと（等ウェイト平均の目的）。"""
-    fake_sources["yahoo"] = FakeSource("yahoo", "ヤフオク", make("yahoo", [2000] * 50))
-    fake_sources["mercari"] = FakeSource("mercari", "メルカリ", make("mercari", [6000] * 4))
-    result = search("ダウン", SearchOptions(cache_ttl=0))
-
+    result = quote("ダウン", two_groups([2000] * 50, [6000] * 4))
     assert result.blend.equal_weight_median == 4000
     assert result.blend.weighted_mean == pytest.approx(2296, abs=1)  # 件数加重だとヤフオク寄り
 
 
-def test_one_source_failing_does_not_break_the_other(fake_sources):
-    fake_sources["yahoo"] = FakeSource("yahoo", "ヤフオク", error="HTTP 503")
-    fake_sources["mercari"] = FakeSource("mercari", "メルカリ", make("mercari", [5000, 6000, 7000]))
-    result = search("ダウン", SearchOptions(cache_ttl=0))
+def test_one_site_only_still_works_but_warns():
+    result = quote("ダウン", [group("yahoo", "ヤフオク", [5000, 6000, 7000, 8000, 9000])])
+    assert result.blend.equal_weight_median == 7000
+    assert any("片方のサイトだけ" in w for w in result.warnings)
 
+
+def test_empty_group_does_not_break_the_other():
+    result = quote("ダウン", [group("yahoo", "ヤフオク", []), group("mercari", "メルカリ", [5000, 6000, 7000])])
     assert result.combined.count == 3
-    assert result.blend.equal_weight_median == 6000
     assert result.blend.sources_used == ["mercari"]
-    assert any("HTTP 503" in w for w in result.warnings)
 
 
-def test_bundle_listings_are_excluded_from_the_statistics(fake_sources):
-    listings = make("yahoo", [5000] * 6) + make("yahoo", [2000], title="まとめ売り 10点")
-    listings[-1].item_id = "bundle"
-    fake_sources["yahoo"] = FakeSource("yahoo", "ヤフオク", listings)
-    result = search("ダウン", SearchOptions(sources=("yahoo",), cache_ttl=0))
+def test_bundle_listings_are_excluded_from_the_statistics():
+    entries = [ParsedEntry("ダウン L", 5000) for _ in range(6)]
+    entries.append(ParsedEntry("ノースフェイス まとめ売り 10点", 2000))
+    result = quote("ダウン", [InputGroup("yahoo", "ヤフオク", entries=entries)])
 
     source = result.sources[0]
     assert source.stats.count == 6
     assert source.excluded_count == 1
-    assert next(x for x in source.listings if x.item_id == "bundle").exclude_reason == "まとめ売り"
+    assert source.listings[-1].exclude_reason == "まとめ売り"
 
 
-def test_outliers_are_removed_and_counted(fake_sources):
+def test_outliers_are_removed_and_counted():
     prices = [5000, 5100, 5200, 5300, 5400, 5500, 5600, 5700, 900000]
-    fake_sources["yahoo"] = FakeSource("yahoo", "ヤフオク", make("yahoo", prices))
-    result = search("ダウン", SearchOptions(sources=("yahoo",), cache_ttl=0))
-
+    result = quote("ダウン", [group("yahoo", "ヤフオク", prices)])
     assert result.sources[0].outlier_count == 1
     assert result.sources[0].stats.max == 5700
 
 
-def test_outlier_removal_can_be_turned_off(fake_sources):
+def test_outlier_removal_can_be_turned_off():
     prices = [5000, 5100, 5200, 5300, 5400, 5500, 5600, 5700, 900000]
-    fake_sources["yahoo"] = FakeSource("yahoo", "ヤフオク", make("yahoo", prices))
-    result = search("ダウン", SearchOptions(sources=("yahoo",), remove_outliers=False, cache_ttl=0))
-
+    result = quote("ダウン", [group("yahoo", "ヤフオク", prices)], QuoteOptions(remove_outliers=False))
     assert result.sources[0].outlier_count == 0
     assert result.sources[0].stats.max == 900000
 
 
-def test_empty_query_short_circuits(fake_sources):
-    result = search("   ", SearchOptions(cache_ttl=0))
-    assert result.sources == [] and result.warnings
+def test_exclude_words_are_applied():
+    entries = [ParsedEntry("ダウン L", 5000), ParsedEntry("ジュニア ダウン", 3000)]
+    result = quote("ダウン", [InputGroup("yahoo", "ヤフオク", entries=entries)],
+                   QuoteOptions(exclude_words=["ジュニア"]))
+    assert result.sources[0].stats.count == 1
 
 
-def test_no_data_produces_a_warning(fake_sources):
-    fake_sources["yahoo"] = FakeSource("yahoo", "ヤフオク", [])
-    result = search("存在しない語", SearchOptions(sources=("yahoo",), cache_ttl=0))
-    assert result.combined.count == 0
-    assert any("見つかりません" in w for w in result.warnings)
+# --- 貼り付けテキストからの経路 ------------------------------------------
+def test_quote_parses_pasted_text():
+    yahoo = "ヌプシ A\n落札 9,800円\nヌプシ B\n落札 11,200円\n"
+    mercari = "¥13,800\nヌプシ C\n¥12,400\nヌプシ D\n"
+    result = quote("ヌプシ", [InputGroup("yahoo", "ヤフオク", yahoo), InputGroup("mercari", "メルカリ", mercari)])
 
-
-def test_histogram_series_follow_the_sources(fake_sources):
-    fake_sources["yahoo"] = FakeSource("yahoo", "ヤフオク", make("yahoo", [1000, 2000, 3000]))
-    fake_sources["mercari"] = FakeSource("mercari", "メルカリ", make("mercari", [5000, 6000]))
-    result = search("ダウン", SearchOptions(cache_ttl=0))
-
+    assert [s.parse["prices_found"] for s in result.sources] == [2, 2]
+    assert result.blend.equal_weight_median == 11800
     assert result.histogram.series == ["ヤフオク", "メルカリ"]
-    assert sum(sum(row) for row in result.histogram.counts) == 5
 
 
-def test_limit_is_clamped():
-    assert SearchOptions(limit=10_000).clamped_limit() == service.MAX_LIMIT
-    assert SearchOptions(limit=0).clamped_limit() == 1
+def test_text_without_prices_reports_an_error_for_that_group_only():
+    result = quote("ヌプシ", [
+        InputGroup("yahoo", "ヤフオク", "ノースフェイス ヌプシ\nパタゴニア レトロX\n"),
+        InputGroup("mercari", "メルカリ", "¥13,800\nヌプシ C\n¥12,400\nヌプシ D\n"),
+    ])
+    assert result.sources[0].error and "読み取れませんでした" in result.sources[0].error
+    assert result.sources[1].stats.count == 2
+    assert result.combined.count == 2
+    assert any("ヤフオク" in w for w in result.warnings)
+
+
+def test_no_input_at_all_warns():
+    result = quote("ヌプシ", [InputGroup("yahoo", "ヤフオク", "")])
+    assert result.combined.count == 0
+    assert any("貼り付けて" in w for w in result.warnings)
+
+
+def test_thin_sample_warns():
+    result = quote("ヌプシ", two_groups([1000, 2000], [5000, 6000]))
+    assert any("信頼度は低め" in w for w in result.warnings)
+
+
+# --- 検索ページのリンク --------------------------------------------------
+def test_search_page_urls_target_sold_items():
+    yahoo = search_page_url("yahoo", "ヌプシ 700")
+    mercari = search_page_url("mercari", "ヌプシ 700")
+    assert "closedsearch" in yahoo                 # 落札相場ページ
+    assert "status=sold_out" in mercari            # 売り切れのみ
+    assert "%20700" in yahoo and "%20700" in mercari
+    assert search_page_url("unknown", "x") == ""

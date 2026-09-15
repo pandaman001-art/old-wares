@@ -1,62 +1,81 @@
-"""FastAPI アプリ本体。UI と JSON/CSV API を提供する。"""
+"""FastAPI アプリ本体。UI と JSON API を提供する。
+
+外部サイトへのアクセスは一切しない。価格は利用者が貼り付けたテキストから読む。
+"""
 
 from __future__ import annotations
 
-import csv
-import io
-import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 
 from . import __version__
-from .cache import Cache
-from .service import MAX_LIMIT, SearchOptions, search
-from .sources import DEFAULT_SOURCES, available_sources
+from .service import (
+    DEFAULT_GROUPS,
+    InputGroup,
+    QuoteOptions,
+    quote,
+    search_page_url,
+)
+from .store import RecordStore
 
 STATIC_DIR = Path(__file__).parent / "static"
+MAX_TEXT_LENGTH = 400_000
 
 app = FastAPI(
     title="old-wares",
-    description="ヤフオクとメルカリの実売価格から中古服の相場を出す",
+    description="ヤフオクとメルカリの検索結果を貼り付けて中古服の相場を出す",
     version=__version__,
 )
 
 
-def _split_csv(value: str | None) -> list[str]:
-    return [part.strip() for part in (value or "").split(",") if part.strip()]
+# --- リクエストの形 ------------------------------------------------------
+class GroupIn(BaseModel):
+    key: str = Field(..., min_length=1, max_length=40)
+    label: str = Field("", max_length=80)
+    text: str = Field("", max_length=MAX_TEXT_LENGTH)
 
 
-def _build_options(
-    sources: str | None,
-    limit: int,
-    price_min: int | None,
-    price_max: int | None,
-    exclude: str | None,
-    default_excludes: bool,
-    remove_outliers: bool,
-    fresh: bool,
-) -> SearchOptions:
-    keys = tuple(_split_csv(sources)) or DEFAULT_SOURCES
-    known = {s["key"] for s in available_sources()}
-    unknown = [k for k in keys if k not in known]
-    if unknown:
-        raise HTTPException(status_code=400, detail=f"未知の取得元: {', '.join(unknown)}")
-    if price_min is not None and price_max is not None and price_min > price_max:
-        raise HTTPException(status_code=400, detail="price_min が price_max を超えています")
-    return SearchOptions(
-        sources=keys,
-        limit=limit,
-        price_min=price_min,
-        price_max=price_max,
-        exclude_words=_split_csv(exclude),
-        use_default_excludes=default_excludes,
-        remove_outliers=remove_outliers,
-        cache_ttl=0 if fresh else int(os.environ.get("OLDWARES_CACHE_TTL", 1800)),
+class OptionsIn(BaseModel):
+    price_min: int | None = Field(None, ge=0)
+    price_max: int | None = Field(None, ge=0)
+    exclude_words: list[str] = Field(default_factory=list)
+    use_default_excludes: bool = True
+    remove_outliers: bool = True
+
+
+class QuoteIn(BaseModel):
+    query: str = Field("", max_length=200)
+    groups: list[GroupIn] = Field(default_factory=list)
+    options: OptionsIn = Field(default_factory=OptionsIn)
+
+
+class RecordIn(BaseModel):
+    query: str = Field("", max_length=200)
+    groups: list[GroupIn] = Field(default_factory=list)
+    summary: dict = Field(default_factory=dict)
+    note: str = Field("", max_length=500)
+
+
+DEFAULT_LABELS = dict(DEFAULT_GROUPS)
+
+
+def _to_options(payload: OptionsIn) -> QuoteOptions:
+    if payload.price_min is not None and payload.price_max is not None:
+        if payload.price_min > payload.price_max:
+            raise HTTPException(status_code=400, detail="下限価格が上限価格を超えています")
+    return QuoteOptions(
+        price_min=payload.price_min,
+        price_max=payload.price_max,
+        exclude_words=[w.strip() for w in payload.exclude_words if w.strip()],
+        use_default_excludes=payload.use_default_excludes,
+        remove_outliers=payload.remove_outliers,
     )
 
 
+# --- 画面 ----------------------------------------------------------------
 @app.get("/", include_in_schema=False)
 def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
@@ -67,76 +86,56 @@ def health() -> dict:
     return {"status": "ok", "version": __version__}
 
 
-@app.get("/api/sources")
-def sources() -> dict:
-    return {"sources": available_sources(), "default": list(DEFAULT_SOURCES)}
+@app.get("/api/groups")
+def groups(q: str = Query("", max_length=200)) -> dict:
+    """既定の入力グループと、利用者が自分で開くための検索ページ URL。"""
+    return {
+        "groups": [
+            {"key": key, "label": label, "search_url": search_page_url(key, q) if q else ""}
+            for key, label in DEFAULT_GROUPS
+        ]
+    }
 
 
-@app.get("/api/search")
-def api_search(
-    q: str = Query(..., min_length=1, description="検索語（例: ノースフェイス ヌプシ 700）"),
-    sources: str | None = Query(None, description="カンマ区切り。既定は yahoo,mercari"),
-    limit: int = Query(120, ge=1, le=MAX_LIMIT, description="取得元ごとの最大取得件数"),
-    price_min: int | None = Query(None, ge=0),
-    price_max: int | None = Query(None, ge=0),
-    exclude: str | None = Query(None, description="カンマ区切りの除外語"),
-    default_excludes: bool = Query(True, description="まとめ売り等の既定除外を使う"),
-    remove_outliers: bool = Query(True, description="IQR で外れ値を除く"),
-    fresh: bool = Query(False, description="キャッシュを使わず取得し直す"),
-) -> JSONResponse:
-    options = _build_options(
-        sources, limit, price_min, price_max, exclude, default_excludes, remove_outliers, fresh
+@app.post("/api/quote")
+def api_quote(payload: QuoteIn) -> dict:
+    if not payload.groups:
+        raise HTTPException(status_code=400, detail="入力グループがありません")
+    options = _to_options(payload.options)
+    groups = [
+        InputGroup(key=g.key, label=g.label or DEFAULT_LABELS.get(g.key, g.key), text=g.text)
+        for g in payload.groups
+    ]
+    return quote(payload.query, groups, options).to_dict()
+
+
+# --- 保存した調査 --------------------------------------------------------
+@app.get("/api/records")
+def list_records(limit: int = Query(50, ge=1, le=200)) -> dict:
+    return {"records": RecordStore().list(limit=limit)}
+
+
+@app.post("/api/records", status_code=201)
+def create_record(payload: RecordIn) -> dict:
+    record = RecordStore().save(
+        query=payload.query,
+        groups=[g.model_dump() for g in payload.groups],
+        summary=payload.summary,
+        note=payload.note,
     )
-    result = search(q, options)
-    return JSONResponse(result.to_dict())
+    return record.to_dict()
 
 
-@app.get("/api/export.csv")
-def export_csv(
-    q: str = Query(..., min_length=1),
-    sources: str | None = Query(None),
-    limit: int = Query(120, ge=1, le=MAX_LIMIT),
-    price_min: int | None = Query(None, ge=0),
-    price_max: int | None = Query(None, ge=0),
-    exclude: str | None = Query(None),
-    default_excludes: bool = Query(True),
-    remove_outliers: bool = Query(True),
-    include_excluded: bool = Query(False, description="除外された出品も出力する"),
-) -> StreamingResponse:
-    options = _build_options(
-        sources, limit, price_min, price_max, exclude, default_excludes, remove_outliers, True
-    )
-    result = search(q, options)
-
-    buffer = io.StringIO()
-    writer = csv.writer(buffer)
-    writer.writerow(["取得元", "タイトル", "価格", "売却日", "状態", "URL", "統計に使用", "除外理由"])
-    for source_result in result.sources:
-        for listing in source_result.listings:
-            if listing.excluded and not include_excluded:
-                continue
-            writer.writerow(
-                [
-                    source_result.label,
-                    listing.title,
-                    listing.price,
-                    listing.sold_at.isoformat() if listing.sold_at else "",
-                    listing.condition or "",
-                    listing.url,
-                    "no" if listing.excluded else "yes",
-                    listing.exclude_reason or "",
-                ]
-            )
-    # Excel で文字化けしないよう BOM 付き UTF-8 で返す
-    payload = "﻿" + buffer.getvalue()
-    filename = "oldwares.csv"
-    return StreamingResponse(
-        iter([payload]),
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+@app.get("/api/records/{record_id}")
+def get_record(record_id: str) -> dict:
+    record = RecordStore().get(record_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="見つかりません")
+    return record.to_dict()
 
 
-@app.post("/api/cache/clear")
-def clear_cache() -> dict:
-    return {"removed": Cache().clear()}
+@app.delete("/api/records/{record_id}")
+def delete_record(record_id: str) -> dict:
+    if not RecordStore().delete(record_id):
+        raise HTTPException(status_code=404, detail="見つかりません")
+    return {"deleted": record_id}

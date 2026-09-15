@@ -1,63 +1,91 @@
-"""検索の組み立て：複数取得元を並列に叩き、フィルタして相場を出す。"""
+"""貼り付けられた明細から相場を組み立てる。"""
 
 from __future__ import annotations
 
 import statistics
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 from . import stats as stats_mod
-from .cache import Cache
 from .models import Blend, Listing, SearchResult, SourceResult
-from .normalize import DEFAULT_MAX_PRICE, DEFAULT_MIN_PRICE, apply_filters, dedupe, normalize_query
-from .sources import DEFAULT_SOURCES, build_source
+from .normalize import DEFAULT_MAX_PRICE, DEFAULT_MIN_PRICE, apply_filters, normalize_query
+from .parsing import ParsedEntry, parse_pasted_text
 
 OUTLIER_REASON = "外れ値(IQR)"
-MAX_LIMIT = 480
+
+# 既定の入力グループ（この 2 つの中央値の平均が「相場」になる）
+DEFAULT_GROUPS: tuple[tuple[str, str], ...] = (
+    ("yahoo", "ヤフオク（落札価格）"),
+    ("mercari", "メルカリ（売り切れ）"),
+)
+
+# 検索ページを開くためのリンク。ここから先は人が見てコピーする
+SEARCH_PAGE_TEMPLATES = {
+    "yahoo": "https://auctions.yahoo.co.jp/closedsearch/closedsearch?p={q}&n=100&s1=end&o1=d",
+    "mercari": "https://jp.mercari.com/search?keyword={q}&status=sold_out&order=desc&sort=created_time",
+}
 
 
 @dataclass
-class SearchOptions:
-    sources: tuple[str, ...] = DEFAULT_SOURCES
-    limit: int = 120
+class InputGroup:
+    """1 サイトぶんの貼り付け内容。"""
+
+    key: str
+    label: str
+    text: str = ""
+    entries: list[ParsedEntry] | None = None
+
+
+@dataclass
+class QuoteOptions:
     price_min: int | None = None
     price_max: int | None = None
     exclude_words: list[str] = field(default_factory=list)
     use_default_excludes: bool = True
     remove_outliers: bool = True
     iqr_k: float = stats_mod.DEFAULT_IQR_K
-    timeout: float = 20.0
-    cache_ttl: int = 30 * 60
-
-    def clamped_limit(self) -> int:
-        return max(1, min(MAX_LIMIT, self.limit))
 
 
 def _mark_outliers(listings: list[Listing], k: float) -> int:
-    """IQR の外にある出品に印をつけ、除いた件数を返す。"""
+    """IQR の外にある明細に印をつけ、除いた件数を返す。"""
     kept = [x for x in listings if not x.excluded]
     bounds = stats_mod.iqr_bounds([x.price for x in kept], k)
     if bounds is None:
         return 0
     low, high = bounds
-    removed = 0
-    for listing in kept:
-        if not (low <= listing.price <= high):
-            listing.excluded = True
-            listing.exclude_reason = OUTLIER_REASON
-            removed += 1
-    # 全件落ちる異常ケースでは巻き戻す
-    if removed == len(kept):
-        for listing in kept:
-            if listing.exclude_reason == OUTLIER_REASON:
-                listing.excluded = False
-                listing.exclude_reason = None
+    removed = [x for x in kept if not (low <= x.price <= high)]
+    if len(removed) == len(kept):  # 全件落ちる異常ケースでは何もしない
         return 0
-    return removed
+    for listing in removed:
+        listing.excluded = True
+        listing.exclude_reason = OUTLIER_REASON
+    return len(removed)
 
 
-def _finalize_source(result: SourceResult, query: str, options: SearchOptions) -> SourceResult:
-    result.listings = dedupe(result.listings)
+def _to_listings(key: str, entries: list[ParsedEntry]) -> list[Listing]:
+    return [
+        Listing(source=key, item_id=f"{key}-{i:04d}", title=entry.title, price=entry.price)
+        for i, entry in enumerate(entries)
+    ]
+
+
+def _build_group(group: InputGroup, query: str, options: QuoteOptions) -> SourceResult:
+    result = SourceResult(source=group.key, label=group.label)
+    if group.entries is not None:
+        entries = list(group.entries)
+        result.parse = {"mode": "direct", "prices_found": len(entries), "untitled": 0, "lines": len(entries)}
+    else:
+        report = parse_pasted_text(group.text)
+        entries = report.entries
+        result.parse = report.to_dict()
+        if report.lines and not entries:
+            result.error = (
+                "貼り付けたテキストから金額を 1 件も読み取れませんでした。"
+                "価格が「¥12,800」や「12,800円」の形で含まれているか確認してください。"
+            )
+            result.stats = stats_mod.compute([])
+            return result
+
+    result.listings = _to_listings(group.key, entries)
     apply_filters(
         result.listings,
         query=query,
@@ -74,7 +102,7 @@ def _finalize_source(result: SourceResult, query: str, options: SearchOptions) -
 
 
 def _blend(results: list[SourceResult]) -> Blend:
-    """取得元ごとの代表値を等ウェイトで平均する（＝両サイトの平均）。"""
+    """入力グループごとの代表値を等ウェイトで平均する（＝両サイトの平均）。"""
     usable = [r for r in results if r.stats and r.stats.count > 0]
     if not usable:
         return Blend()
@@ -89,40 +117,21 @@ def _blend(results: list[SourceResult]) -> Blend:
     )
 
 
-def search(query: str, options: SearchOptions | None = None) -> SearchResult:
-    """query の相場を調べる。取得元の片方が落ちても、もう片方の結果は返す。"""
-    options = options or SearchOptions()
+def search_page_url(key: str, query: str) -> str:
+    """ユーザーが自分でブラウザで開くための検索ページ URL。"""
+    from urllib.parse import quote as urlquote
+
+    template = SEARCH_PAGE_TEMPLATES.get(key)
+    return template.format(q=urlquote(query)) if template else ""
+
+
+def quote(query: str, groups: list[InputGroup], options: QuoteOptions | None = None) -> SearchResult:
+    """貼り付け内容から相場を出す。1 グループだけでも成立する。"""
+    options = options or QuoteOptions()
     normalized = normalize_query(query)
     result = SearchResult(query=normalized)
-    if not normalized:
-        result.warnings.append("検索語が空です。")
-        return result
 
-    cache = Cache(ttl=options.cache_ttl)
-    limit = options.clamped_limit()
-
-    def run(key: str) -> SourceResult:
-        try:
-            source = build_source(key, timeout=options.timeout, cache=cache)
-        except KeyError:
-            return SourceResult(source=key, label=key, error=f"未知の取得元: {key}")
-        return source.collect(
-            normalized,
-            limit=limit,
-            price_min=options.price_min,
-            price_max=options.price_max,
-        )
-
-    keys = list(options.sources) or list(DEFAULT_SOURCES)
-    with ThreadPoolExecutor(max_workers=max(1, len(keys))) as pool:
-        result.sources = list(pool.map(run, keys))
-
-    for source_result in result.sources:
-        if source_result.ok:
-            _finalize_source(source_result, normalized, options)
-        else:
-            source_result.stats = stats_mod.compute([])
-            result.warnings.append(f"{source_result.label}: {source_result.error}")
+    result.sources = [_build_group(group, normalized, options) for group in groups]
 
     pooled = [x.price for r in result.sources for x in r.kept]
     result.combined = stats_mod.compute(pooled)
@@ -131,11 +140,17 @@ def search(query: str, options: SearchOptions | None = None) -> SearchResult:
         {r.label: [x.price for x in r.kept] for r in result.sources if r.kept}
     )
 
-    thin = [r.label for r in result.sources if r.ok and r.stats and r.stats.count < 5]
+    for source_result in result.sources:
+        if source_result.error:
+            result.warnings.append(f"{source_result.label}: {source_result.error}")
+
+    thin = [r.label for r in result.sources if not r.error and r.stats and 0 < r.stats.count < 5]
     if thin:
+        result.warnings.append("件数が少ないため相場の信頼度は低めです: " + " / ".join(thin))
+    if result.combined.count == 0 and not any(r.error for r in result.sources):
+        result.warnings.append("価格が入力されていません。検索結果をコピーして貼り付けてください。")
+    elif len(result.blend.sources_used) == 1:
         result.warnings.append(
-            "サンプル数が少ないため相場の信頼度は低めです: " + " / ".join(thin)
+            "片方のサイトだけで計算しています。両方貼るとサイト差を均した相場になります。"
         )
-    if result.combined.count == 0 and not any(not r.ok for r in result.sources):
-        result.warnings.append("条件に合う実売データが見つかりませんでした。検索語を短くしてみてください。")
     return result
