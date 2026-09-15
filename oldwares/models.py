@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 
 def _jsonable(value: Any) -> Any:
-    if isinstance(value, (date, datetime)):
+    if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, dict):
         return {k: _jsonable(v) for k, v in value.items()}
@@ -28,29 +28,12 @@ class Listing:
     item_id: str
     title: str
     price: int
-    url: str
-    sold_at: date | None = None
-    condition: str | None = None
-    image_url: str | None = None
     # 除外フィルタに引っかかった場合、理由を残したうえで統計からは外す
     excluded: bool = False
     exclude_reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return _jsonable(self)
-
-    @classmethod
-    def from_dict(cls, row: dict[str, Any]) -> "Listing":
-        """to_dict() の逆変換（キャッシュの読み戻し用）。未知のキーは無視する。"""
-        known = {f.name for f in dataclasses.fields(cls)}
-        data = {k: v for k, v in row.items() if k in known}
-        sold_at = data.get("sold_at")
-        if isinstance(sold_at, str):
-            try:
-                data["sold_at"] = date.fromisoformat(sold_at[:10])
-            except ValueError:
-                data["sold_at"] = None
-        return cls(**data)
 
 
 @dataclass
@@ -80,7 +63,7 @@ class PriceStats:
 
 @dataclass
 class SourceResult:
-    """1 つの取得元（ヤフオク / メルカリ）の結果。"""
+    """1 つの入力グループ（ヤフオク / メルカリ）の集計結果。"""
 
     source: str
     label: str
@@ -88,10 +71,8 @@ class SourceResult:
     stats: PriceStats | None = None
     excluded_count: int = 0
     outlier_count: int = 0
-    search_url: str | None = None
-    elapsed_ms: int | None = None
+    parse: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
-    cached: bool = False
 
     @property
     def ok(self) -> bool:
@@ -107,9 +88,7 @@ class SourceResult:
             "label": self.label,
             "ok": self.ok,
             "error": self.error,
-            "cached": self.cached,
-            "search_url": self.search_url,
-            "elapsed_ms": self.elapsed_ms,
+            "parse": dict(self.parse),
             "fetched_count": len(self.listings),
             "used_count": self.stats.count if self.stats else 0,
             "excluded_count": self.excluded_count,
