@@ -49,8 +49,11 @@ export function newId(now = new Date()) {
 }
 
 /** 貼り付け内容ごと保存する。後から開き直して再計算できる。 */
-export async function saveRecord({ query, groups, summary, note = "" }) {
-  const record = { id: newId(), query, createdAt: new Date().toISOString(), groups, summary, note };
+export async function saveRecord({ query, groups, summary, note = "", photo = null, tagText = "", barcode = "" }) {
+  const record = {
+    id: newId(), query, createdAt: new Date().toISOString(),
+    groups, summary, note, photo, tagText, barcode,
+  };
   await transact("readwrite", (store) => store.put(record));
   return record;
 }
@@ -61,7 +64,8 @@ export async function listRecords(limit = 50) {
   return all
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
     .slice(0, limit)
-    .map(({ id, query, createdAt, note, summary }) => ({ id, query, createdAt, note, summary }));
+    // 貼り付け本文は重いので一覧では返さない。写真はサムネイルに使うので残す
+    .map(({ id, query, createdAt, note, summary, photo }) => ({ id, query, createdAt, note, summary, photo }));
 }
 
 export function getRecord(id) {

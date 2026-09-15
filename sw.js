@@ -1,15 +1,19 @@
 // アプリ本体をキャッシュして、オフラインでも開けるようにする。
 // データ取得は一切しないので、キャッシュするのは静的ファイルだけ。
 
-const CACHE = "oldwares-v1";
+const CACHE = "oldwares-v2";
 const ASSETS = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
   "./js/app.js",
+  "./js/barcode.js",
+  "./js/brands.js",
   "./js/chart.js",
+  "./js/identify.js",
   "./js/normalize.js",
   "./js/parsing.js",
+  "./js/photo.js",
   "./js/quote.js",
   "./js/stats.js",
   "./js/store.js",
