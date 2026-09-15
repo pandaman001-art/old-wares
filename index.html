@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>old-wares — 中古服の相場</title>
+<meta name="description" content="ヤフオクとメルカリの検索結果を貼り付けて中古服の相場を出す">
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f9f9f7">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0d0d0d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="相場">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<link rel="icon" href="./icons/icon-192.png" sizes="192x192">
+<style>
+  :root {
+    color-scheme: light;
+    --plane:          #f9f9f7;
+    --surface-1:      #fcfcfb;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --grid:           #e1e0d9;
+    --axis:           #c3c2b7;
+    --border:         rgba(11, 11, 11, 0.10);
+    --series-yahoo:   #2a78d6;
+    --series-mercari: #eb6834;
+    --critical:       #d03b3b;
+    --warning:        #fab219;
+    --good:           #0ca30c;
+    --field-bg:       #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --plane:          #0d0d0d;
+      --surface-1:      #1a1a19;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --grid:           #2c2c2a;
+      --axis:           #383835;
+      --border:         rgba(255, 255, 255, 0.10);
+      --series-yahoo:   #3987e5;
+      --series-mercari: #d95926;
+      --field-bg:       #111110;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --plane:          #0d0d0d;
+    --surface-1:      #1a1a19;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --grid:           #2c2c2a;
+    --axis:           #383835;
+    --border:         rgba(255, 255, 255, 0.10);
+    --series-yahoo:   #3987e5;
+    --series-mercari: #d95926;
+    --field-bg:       #111110;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--plane);
+    color: var(--text-primary);
+    font: 14px/1.6 system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  /* ホーム画面から起動したときに、ノッチやホームバーに隠れないようにする */
+  .wrap {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: calc(20px + env(safe-area-inset-top, 0px)) 16px calc(64px + env(safe-area-inset-bottom, 0px));
+  }
+
+  header.top { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+  header.top h1 { font-size: 20px; margin: 0; }
+  header.top p { margin: 0; color: var(--text-secondary); font-size: 13px; }
+  .spacer { flex: 1 1 auto; }
+
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .card + .card { margin-top: 16px; }
+
+  .steps { margin: 0 0 14px; padding-left: 1.2em; color: var(--text-secondary); font-size: 13px; }
+  .steps li { margin: 2px 0; }
+
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row.grow > input[type=text] { flex: 1 1 280px; min-width: 0; }
+  label.field { display: inline-flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+  input[type=text], input[type=number], textarea {
+    font: inherit; color: var(--text-primary); background: var(--field-bg);
+    border: 1px solid var(--axis); border-radius: 8px; padding: 10px 11px;
+  }
+  /* iOS で入力時に画面が拡大しないよう、フォントは 16px 以上にする */
+  @media (max-width: 640px) {
+    input[type=text], input[type=number], textarea { font-size: 16px; }
+  }
+  input[type=number] { width: 120px; }
+  textarea { width: 100%; min-height: 150px; resize: vertical; line-height: 1.5; }
+  input:focus-visible, button:focus-visible, textarea:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--series-yahoo); outline-offset: 2px;
+  }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; border-radius: 8px;
+    padding: 10px 18px; min-height: 44px;   /* 指で押せる大きさ */
+    border: 1px solid var(--series-yahoo); background: var(--series-yahoo); color: #fff;
+  }
+  button.ghost { background: transparent; color: var(--text-primary); border-color: var(--axis); font-weight: 500; }
+  button.small { padding: 6px 12px; min-height: 36px; font-size: 13px; }
+  button.link { background: none; border: none; color: var(--series-yahoo); padding: 6px 8px; min-height: 36px; font-weight: 500; }
+  .checks { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); }
+  .checks label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  details.adv summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; padding: 6px 0; }
+  details.adv[open] summary { margin-bottom: 10px; }
+
+  .panes { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; margin-top: 14px; }
+  .pane h3 { margin: 0 0 6px; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .pane-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .pane .status { font-size: 12px; color: var(--text-secondary); min-height: 1.6em; margin-top: 4px; }
+  .pane .status.ok { color: var(--good); }
+  .pane .status.bad { color: var(--critical); }
+
+  .headline { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-end; }
+  .hero-label { font-size: 12px; color: var(--text-secondary); letter-spacing: .04em; }
+  .hero-value { font-size: 40px; font-weight: 650; line-height: 1.1; letter-spacing: -.01em; }
+  .hero-sub { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+  .tiles { display: flex; gap: 24px; flex-wrap: wrap; }
+  .tile .k { font-size: 12px; color: var(--text-secondary); }
+  .tile .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  .sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+  .src { border: 1px solid var(--border); border-radius: 10px; padding: 13px 14px; }
+  .src h3 { margin: 0 0 8px; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .src dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 13px; }
+  .src dt { color: var(--text-secondary); }
+  .src dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .src .note { margin-top: 8px; font-size: 12px; color: var(--text-secondary); }
+  .src.failed { border-color: var(--critical); }
+  .src .err { margin-top: 8px; font-size: 12px; color: var(--critical); }
+
+  .chart-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+  .chart-head h2 { font-size: 15px; margin: 0; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--text-secondary); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .chart-box { position: relative; }
+  svg.hist { display: block; width: 100%; height: auto; }
+  .tip {
+    position: absolute; pointer-events: none; opacity: 0; transition: opacity .09s;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 10px; font-size: 12px; min-width: 150px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, .14); z-index: 5;
+  }
+  .tip .line { display: flex; justify-content: space-between; gap: 14px; margin-top: 3px; color: var(--text-secondary); }
+  .tip .line em { font-style: normal; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+
+  .table-scroll { overflow: auto; max-height: 440px; -webkit-overflow-scrolling: touch; }
+  .table-scroll thead th { position: sticky; top: 0; background: var(--surface-1); z-index: 1; }
+  .table-scroll thead th::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: var(--axis); }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  th { color: var(--text-secondary); font-weight: 600; cursor: pointer; user-select: none; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.title { white-space: normal; min-width: 200px; }
+  tr.out td { color: var(--text-muted); }
+  .tag { font-size: 11px; border: 1px solid var(--axis); border-radius: 999px; padding: 1px 7px; color: var(--text-secondary); }
+
+  .records { list-style: none; margin: 0; padding: 0; }
+  .records li { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--grid); font-size: 13px; }
+  .records .q { font-weight: 600; }
+  .records .when { color: var(--text-muted); font-size: 12px; }
+  .records .val { font-variant-numeric: tabular-nums; }
+
+  .banner { border-left: 3px solid var(--warning); padding: 8px 12px; font-size: 13px; color: var(--text-secondary); }
+  .muted { color: var(--text-secondary); }
+  footer.note { margin-top: 24px; font-size: 12px; color: var(--text-muted); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <h1>old-wares</h1>
+    <p>ヤフオクとメルカリの<strong>実売価格</strong>から中古服の相場を出す</p>
+    <span class="spacer"></span>
+    <button type="button" class="ghost small" id="theme-toggle" aria-label="表示テーマを切り替える">◐ テーマ</button>
+  </header>
+
+  <section class="card">
+    <ol class="steps">
+      <li>調べたい服の名前を入れる</li>
+      <li>「検索ページを開く」から検索結果を開く（<strong>売れたものだけ</strong>が出るリンクです）</li>
+      <li>一覧を選択してコピーし、下の枠に貼り付ける</li>
+      <li>「相場を計算」を押す</li>
+    </ol>
+
+    <div class="row grow">
+      <input type="text" id="q" placeholder="例: ノースフェイス ヌプシ 700 ダウン" autocomplete="off" enterkeyhint="done">
+      <button type="button" id="calc">相場を計算</button>
+      <button type="button" class="ghost" id="sample">サンプル</button>
+      <button type="button" class="ghost" id="clear">クリア</button>
+    </div>
+
+    <div class="panes" id="panes"></div>
+
+    <details class="adv" style="margin-top:14px">
+      <summary>詳細設定</summary>
+      <div class="row">
+        <label class="field">下限価格<input type="number" id="price_min" placeholder="300" min="0" step="100" inputmode="numeric"></label>
+        <label class="field">上限価格<input type="number" id="price_max" placeholder="指定なし" min="0" step="100" inputmode="numeric"></label>
+        <label class="field" style="flex:1 1 220px">除外語（カンマ区切り）
+          <input type="text" id="exclude" placeholder="例: ジュニア, 海外製" autocomplete="off">
+        </label>
+      </div>
+      <div class="checks" style="margin-top:10px">
+        <label><input type="checkbox" id="default_excludes" checked> まとめ売り・ジャンク等を自動除外</label>
+        <label><input type="checkbox" id="remove_outliers" checked> 外れ値（IQR）を除外</label>
+      </div>
+    </details>
+  </section>
+
+  <div id="messages" hidden></div>
+
+  <section class="card" id="summary" hidden>
+    <div class="headline">
+      <div>
+        <div class="hero-label">相場（両サイトの中央値の平均）</div>
+        <div class="hero-value" id="hero">—</div>
+        <div class="hero-sub" id="hero-sub"></div>
+      </div>
+      <div class="tiles" id="tiles"></div>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button type="button" class="ghost" id="save">この結果を保存</button>
+      <button type="button" class="ghost" id="csv">CSV</button>
+      <span class="muted" id="save-status" style="font-size:12px"></span>
+    </div>
+  </section>
+
+  <section class="card" id="source-cards" hidden>
+    <div class="sources" id="sources"></div>
+  </section>
+
+  <section class="card" id="chart-card" hidden>
+    <div class="chart-head">
+      <h2>価格分布</h2>
+      <span class="spacer"></span>
+      <div class="legend" id="legend"></div>
+    </div>
+    <div class="chart-box">
+      <svg class="hist" id="hist" role="img" aria-label="入力元ごとの価格分布ヒストグラム"></svg>
+      <div class="tip" id="tip" role="status"></div>
+    </div>
+  </section>
+
+  <section class="card" id="table-card" hidden>
+    <div class="chart-head">
+      <h2>読み取った明細</h2>
+      <span class="spacer"></span>
+      <label class="muted" style="font-size:13px"><input type="checkbox" id="show-excluded"> 除外分も表示</label>
+    </div>
+    <div class="table-scroll">
+      <table id="table">
+        <thead><tr>
+          <th data-sort="label">入力元</th>
+          <th data-sort="title">商品名</th>
+          <th data-sort="price" class="num">価格</th>
+          <th>状態</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="muted" id="table-note" style="font-size:12px"></p>
+  </section>
+
+  <section class="card" id="records-card" hidden>
+    <div class="chart-head"><h2>保存した調査</h2></div>
+    <ul class="records" id="records"></ul>
+  </section>
+
+  <footer class="note">
+    このアプリは端末の中だけで動きます。外部サイトへ自動アクセスせず、入力した内容もどこにも送信しません。
+    金額はいずれも実際に売れた価格（ヤフオク＝落札価格 / メルカリ＝売り切れ価格）です。送料の扱いは出品ごとに異なります。
+  </footer>
+</div>
+
+<script type="module" src="./js/app.js"></script>
+</body>
+</html>

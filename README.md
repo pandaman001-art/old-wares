@@ -1,39 +1,35 @@
 # old-wares — 中古服の相場を調べるツール
 
 ヤフオク（落札価格）とメルカリ（売り切れ）の検索結果を**コピーして貼り付ける**と、
-中央値・平均・価格帯・価格分布を出す Web アプリです。
+中央値・平均・価格帯・価格分布を出します。
 
-出品中の希望価格は混ぜません。両方とも「成約した金額」だけを見ます。
-
-**外部サイトへの自動アクセスはしません。** スクレイピングも API 呼び出しもせず、
-利用者が自分でブラウザで開いたページからコピーした内容だけを読みます。
-サイト側の仕様変更で壊れることがなく、規約上の心配もありません。
+スマホのホーム画面に置いて、タップで起動できます（PWA）。
+**サーバーもインターネット接続も要りません。** 全部ブラウザの中で動き、
+入力した内容はどこにも送信されません。機内モードでも使えます。
 
 ![画面](docs/screenshot.png)
 
-## クイックスタート
+## スマホに入れる
 
-```bash
-git clone https://github.com/pandaman001-art/old-wares.git
-cd old-wares
-./run.sh            # 初回は venv 作成 + 依存インストールまでやります
-```
+<https://pandaman001-art.github.io/old-wares/> を開いて、
 
-ブラウザで <http://127.0.0.1:8000> を開いて、
+- **iPhone（Safari）**: 共有ボタン → 「ホーム画面に追加」
+- **Android（Chrome）**: メニュー（⋮） → 「アプリをインストール」
+
+以降はホーム画面のアイコンをタップすれば、アドレスバーなしで起動します。
+初回に開いた時点でアプリ本体が端末にキャッシュされるので、圏外でも立ち上がります。
+
+> リポジトリを clone した直後は、GitHub Pages を有効にする必要があります。
+> Settings → Pages → Source を「Deploy from a branch」、Branch を `main` / `/ (root)` にして保存してください。
+
+## 使い方
 
 1. 調べたい服の名前を入れる（例: `ノースフェイス ヌプシ 700`）
 2. 「検索ページを開く ↗」でヤフオク／メルカリの検索結果を開く（**売れたものだけ**が出るリンクです）
-3. 一覧をドラッグして選択 → コピー → 画面の枠に貼り付け
+3. 一覧を選択してコピーし、アプリに戻って「貼り付け」
 4. 「相場を計算」
 
-まず触ってみるだけなら「サンプルを入れる」で動作を確認できます。
-
-手動で立ち上げる場合:
-
-```bash
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/uvicorn oldwares.api:app --reload
-```
+まず触ってみるだけなら「サンプル」で動作を確認できます。
 
 ## 「相場」の定義
 
@@ -70,7 +66,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
   商品名からは金額と末尾の日付を落とします。
 - **CSV / TSV**（`商品名,価格` または タブ区切り）。価格は右端の数値列。
 - **価格だけの列**（`18500` を 1 行ずつ）。ただし通貨記号が 1 つも出てこない貼り付けに限ります。
-  `¥` や `円` が混ざっているテキストでは、`700`（サイズ）のような裸の数字は価格と見なしません。
+  `¥` や `円` が混ざっているテキストでは、`700`（サイズ）のような裸の数字を価格と見なしません。
 
 `送料込み` `SOLD` `ウォッチ` `残り◯日` などの一覧ページの飾りや日付行は無視します。
 読み取った件数は各枠の下にすぐ出るので、貼り付けが効いているかその場で確認できます。
@@ -92,67 +88,40 @@ CSV には除外分も理由つきで出力されます。
 
 ## 保存
 
-「この結果を保存」を押すと、貼り付けた内容ごと手元に保存されます
-（既定は `~/.local/share/oldwares/`、1 件 1 ファイルの JSON）。
+「この結果を保存」を押すと、貼り付けた内容ごと端末内（IndexedDB）に残ります。
 一覧から「開く」で再計算でき、前に調べたときいくらだったかを見返せます。
-入力中の内容はブラウザの localStorage にも自動で退避するので、リロードしても消えません。
-
-## API
-
-| エンドポイント | 用途 |
-| --- | --- |
-| `POST /api/quote` | 貼り付けテキストから相場を計算して返す |
-| `GET /api/groups?q=...` | 入力グループと、自分で開くための検索ページ URL |
-| `GET /api/records` / `POST /api/records` | 保存した調査の一覧・追加 |
-| `GET /api/records/{id}` / `DELETE /api/records/{id}` | 保存した調査の取得・削除 |
-
-OpenAPI ドキュメントは <http://127.0.0.1:8000/docs> にあります。
-
-```bash
-curl -s http://127.0.0.1:8000/api/quote \
-  -H 'Content-Type: application/json' \
-  -d '{"query":"ヌプシ","groups":[{"key":"yahoo","text":"ヌプシ A\n落札 9,800円"}]}' | jq .blend
-```
-
-## CLI
-
-```bash
-# 検索ページの URL を出す（自分でブラウザで開く）
-.venv/bin/python -m oldwares.cli "ノースフェイス ヌプシ 700" --urls
-
-# コピーした内容をファイルに保存しておいて計算する
-.venv/bin/python -m oldwares.cli "ノースフェイス ヌプシ 700" --yahoo yahoo.txt --mercari mercari.txt
-
-# 標準入力から（macOS なら pbpaste が使えます）
-pbpaste | .venv/bin/python -m oldwares.cli "パタゴニア レトロX" --mercari -
-```
-
-## 環境変数
-
-| 変数 | 既定 | 説明 |
-| --- | --- | --- |
-| `OLDWARES_DATA_DIR` | `~/.local/share/oldwares` | 保存した調査の置き場所 |
+入力中の内容も自動で退避するので、アプリを閉じて検索結果を見に行っても消えません。
+データは端末から出ないので、機種変更時は引き継がれません。
 
 ## 開発
 
+ビルド不要。依存パッケージもありません。
+
 ```bash
-.venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest          # 83 tests
+# ローカルで動かす（任意の静的サーバーで可）
+python3 -m http.server 8000
+# → http://127.0.0.1:8000
+# Service Worker は localhost か HTTPS でのみ動きます
+
+npm test    # 60 tests（Node 18+ 同梱のテストランナー、追加インストール不要）
 ```
 
 構成:
 
 ```
-oldwares/
-  api.py            FastAPI（UI + JSON API）
-  parsing.py        貼り付けテキスト → 商品名と価格
-  service.py        入力グループをまとめて相場を組み立てる
-  stats.py          要約統計 / IQR 外れ値 / ヒストグラム
-  normalize.py      検索語の正規化と除外ルール
-  store.py          保存した調査（1 件 1 JSON）
-  cli.py            コマンドライン
-  static/index.html 画面（依存なしの単一ファイル）
-tests/              83 tests
+index.html              画面（CSS 込み）
+manifest.webmanifest    PWA の定義（アイコン・起動時の見た目）
+sw.js                   Service Worker。アプリ本体をキャッシュしてオフライン起動を可能にする
+js/
+  parsing.js            貼り付けテキスト → 商品名と価格
+  normalize.js          検索語の正規化と除外ルール
+  stats.js              要約統計 / IQR 外れ値 / ヒストグラム
+  quote.js              入力グループをまとめて相場を組み立てる
+  store.js              保存（IndexedDB）と下書き（localStorage）
+  chart.js              価格分布の積み上げヒストグラム（インライン SVG）
+  app.js                画面の組み立てとイベント配線
+icons/                  アイコン（SVG 原本と書き出した PNG）
+tests/                  60 tests
 ```
 
 ## 既知の制約
@@ -163,3 +132,4 @@ tests/              83 tests
   ヤフオクの日付も商品名から取り除くだけで、統計には使っていません。
 - 送料込み / 送料別は出品ごとに異なり、価格には反映していません。
 - サイズ・状態・年式での絞り込みは、検索語と除外語で行う形です。
+- 保存したデータは端末のブラウザ内にあります。サイトデータを消すと一緒に消えます。
