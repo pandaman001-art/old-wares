@@ -152,7 +152,9 @@
     padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(16px + env(safe-area-inset-bottom, 0px));
   }
   .scanner video { width: 100%; max-width: 560px; border-radius: 10px; background: #111; }
-  .scanner p { color: #fff; font-size: 13px; margin: 0; }
+  .scanner p { color: #fff; font-size: 13px; margin: 0; text-align: center; max-width: 520px; padding: 0 8px; }
+  .scanner-actions { display: flex; gap: 12px; align-items: center; }
+  .scanner-actions .ghost { color: #fff; border-color: rgba(255, 255, 255, .5); }
 
   .headline { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-end; }
   .hero-label { font-size: 12px; color: var(--text-secondary); letter-spacing: .04em; }
@@ -232,11 +234,12 @@
     <div class="identify-grid">
       <div>
         <div class="pane-actions">
-          <button type="button" class="ghost small" id="photo-pick">写真を撮る / 選ぶ</button>
+          <button type="button" class="ghost small" id="photo-camera" hidden>カメラで撮る（無音）</button>
+          <button type="button" class="ghost small" id="photo-pick">写真を選ぶ</button>
           <button type="button" class="ghost small" id="scan" hidden>バーコードを読む</button>
           <button type="button" class="ghost small" id="photo-clear" hidden>写真を外す</button>
         </div>
-        <input type="file" id="photo" accept="image/*" capture="environment" hidden>
+        <input type="file" id="photo" accept="image/*" hidden>
         <img id="photo-preview" alt="取り込んだ写真" hidden>
         <p class="muted hint" id="photo-hint" hidden>写真は記録用です。画像から自動で商品名は判別しません。</p>
         <div class="status" id="barcode-status"></div>
@@ -365,8 +368,11 @@
 
 <div class="scanner" id="scanner" hidden>
   <video id="scan-video" playsinline muted></video>
-  <p>バーコードを画面に収めてください</p>
-  <button type="button" class="ghost" id="scan-cancel">やめる</button>
+  <p id="scan-hint">バーコードを画面に収めてください</p>
+  <div class="scanner-actions">
+    <button type="button" id="shutter" hidden>撮る</button>
+    <button type="button" class="ghost" id="scan-cancel">やめる</button>
+  </div>
 </div>
 
 <script type="module" src="./js/app.js"></script>
