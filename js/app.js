@@ -1,6 +1,7 @@
 // 画面の組み立てとイベント配線。
 
-import { barcodeSupported, describeBarcode, scanBarcode } from "./barcode.js";
+import { barcodeSupported, describeBarcode, detectFromVideo } from "./barcode.js";
+import { cameraSupported, captureFrame, startCamera } from "./camera.js";
 import { drawHistogram, SERIES_VARS } from "./chart.js";
 import { buildQueries, identify } from "./identify.js";
 import { shrinkImage } from "./photo.js";
@@ -8,7 +9,7 @@ import { DEFAULT_GROUPS, quote, searchPageUrl } from "./quote.js";
 import { deleteRecord, getRecord, listRecords, loadDraft, saveDraft, saveRecord } from "./store.js";
 
 // 更新が届いたかを画面で確認できるようにする。上げるときは sw.js の CACHE も揃えること
-const APP_VERSION = "v5";
+const APP_VERSION = "v6";
 
 const el = (id) => document.getElementById(id);
 const yen = (n) => (n === null || n === undefined ? "—" : "¥" + Number(n).toLocaleString("ja-JP"));
@@ -44,6 +45,61 @@ MADE IN CHINA`;
 
 el("photo-pick").addEventListener("click", () => el("photo").click());
 
+// 端末のカメラアプリを呼ばず、映像の 1 フレームを切り出す。
+// カメラアプリを起動しないのでシャッター音が鳴らない
+if (cameraSupported()) el("photo-camera").hidden = false;
+
+let cameraStop = null;
+let shutter = null;
+
+async function openCamera(mode) {
+  el("scan-hint").textContent =
+    mode === "photo"
+      ? "写したいものを画面に収めて「撮る」を押してください（シャッター音は鳴りません）"
+      : "バーコードを画面に収めてください";
+  el("shutter").hidden = mode !== "photo";
+  el("scanner").hidden = false;
+  cameraStop = await startCamera(el("scan-video"));
+}
+
+function closeCamera() {
+  cameraStop?.();
+  cameraStop = null;
+  shutter = null;
+  el("scanner").hidden = true;
+  el("shutter").hidden = true;
+}
+
+el("photo-camera").addEventListener("click", async () => {
+  scanController = new AbortController();
+  try {
+    await openCamera("photo");
+    const frame = await new Promise((resolve, reject) => {
+      shutter = resolve;
+      scanController.signal.addEventListener("abort", () => reject(new Error("撮影を中止しました")));
+    });
+    photoBlob = await shrinkImage(frame);
+    showPhoto();
+    el("barcode-status").className = "status";
+    el("barcode-status").textContent = "";
+  } catch (error) {
+    el("barcode-status").className = "status";
+    el("barcode-status").textContent = /中止/.test(error.message) ? "" : error.message;
+  } finally {
+    closeCamera();
+    scanController = null;
+  }
+});
+
+el("shutter").addEventListener("click", async () => {
+  if (!shutter) return;
+  try {
+    shutter(await captureFrame(el("scan-video")));
+  } catch {
+    el("scan-hint").textContent = "まだ映像が来ていません。少し待ってからもう一度押してください。";
+  }
+});
+
 el("photo").addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
@@ -71,20 +127,19 @@ function showPhoto() {
 if (barcodeSupported()) el("scan").hidden = false;
 
 let scanController = null;
+
 el("scan").addEventListener("click", async () => {
-  const scanner = el("scanner");
-  scanner.hidden = false;
   scanController = new AbortController();
   try {
-    const raw = await scanBarcode({ video: el("scan-video"), signal: scanController.signal });
-    barcodeValue = raw;
+    await openCamera("barcode");
+    barcodeValue = await detectFromVideo(el("scan-video"), scanController.signal);
     showBarcodeStatus();
     runIdentify();
   } catch (error) {
     el("barcode-status").className = "status";
     el("barcode-status").textContent = /中止/.test(error.message) ? "" : error.message;
   } finally {
-    scanner.hidden = true;
+    closeCamera();
     scanController = null;
   }
 });

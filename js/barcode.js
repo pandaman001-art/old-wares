@@ -3,6 +3,10 @@
 // ブラウザ標準の BarcodeDetector だけを使う（Android の Chrome などで動く）。
 // 読み取りライブラリは同梱しないので、対応していない端末ではボタンを出さない。
 // 読み取った番号はそのまま検索語として使う。外部への問い合わせは一切しない。
+//
+// カメラの開け閉めは camera.js と共通。写真撮影と同じ映像を使う。
+
+import { startCamera } from "./camera.js";
 
 const FORMATS = ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "itf"];
 
@@ -67,39 +71,32 @@ export function describeBarcode(rawValue) {
 }
 
 /**
- * カメラを起動してバーコードを 1 つ読む。
- * onFrame は映像を表示するための video 要素を受け取るコールバック。
- * 戻り値は読み取った文字列。stop() で途中中断できる。
+ * すでに開いているカメラ映像からバーコードを 1 つ読む。
+ * 映像の開け閉めは呼び出し側（camera.js の startCamera）が持つ。
  */
-export function scanBarcode({ video, signal } = {}) {
-  if (!barcodeSupported()) return Promise.reject(new Error("この端末はバーコード読み取りに対応していません"));
+export async function detectFromVideo(video, signal) {
+  if (!barcodeSupported()) throw new Error("この端末はバーコード読み取りに対応していません");
+  const supported = await window.BarcodeDetector.getSupportedFormats();
+  const formats = FORMATS.filter((format) => supported.includes(format));
+  if (!formats.length) throw new Error("読み取れるバーコードの形式がありません");
 
-  return (async () => {
-    const supported = await window.BarcodeDetector.getSupportedFormats();
-    const formats = FORMATS.filter((format) => supported.includes(format));
-    if (!formats.length) throw new Error("読み取れるバーコードの形式がありません");
+  const detector = new window.BarcodeDetector({ formats });
+  while (!signal?.aborted) {
+    const codes = await detector.detect(video).catch(() => []);
+    const hit = codes.find((code) => code.rawValue);
+    if (hit) return hit.rawValue;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw new Error("読み取りを中止しました");
+}
 
-    const detector = new window.BarcodeDetector({ formats });
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: "environment" } },
-      audio: false,
-    });
-    video.srcObject = stream;
-    video.setAttribute("playsinline", "");
-    await video.play();
-
-    const stop = () => stream.getTracks().forEach((track) => track.stop());
-    try {
-      while (!signal?.aborted) {
-        const codes = await detector.detect(video).catch(() => []);
-        const hit = codes.find((code) => code.rawValue);
-        if (hit) return hit.rawValue;
-        await new Promise((resolve) => setTimeout(resolve, 200));
-      }
-      throw new Error("読み取りを中止しました");
-    } finally {
-      stop();
-      video.srcObject = null;
-    }
-  })();
+/** カメラを開いてバーコードを 1 つ読む。signal で中断できる。 */
+export async function scanBarcode({ video, signal } = {}) {
+  if (!barcodeSupported()) throw new Error("この端末はバーコード読み取りに対応していません");
+  const stop = await startCamera(video);
+  try {
+    return await detectFromVideo(video, signal);
+  } finally {
+    stop();
+  }
 }
