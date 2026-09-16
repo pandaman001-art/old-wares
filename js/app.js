@@ -7,6 +7,9 @@ import { shrinkImage } from "./photo.js";
 import { DEFAULT_GROUPS, quote, searchPageUrl } from "./quote.js";
 import { deleteRecord, getRecord, listRecords, loadDraft, saveDraft, saveRecord } from "./store.js";
 
+// 更新が届いたかを画面で確認できるようにする。上げるときは sw.js の CACHE も揃えること
+const APP_VERSION = "v4";
+
 const el = (id) => document.getElementById(id);
 const yen = (n) => (n === null || n === undefined ? "—" : "¥" + Number(n).toLocaleString("ja-JP"));
 const escapeHtml = (s) =>
@@ -75,11 +78,7 @@ el("scan").addEventListener("click", async () => {
   try {
     const raw = await scanBarcode({ video: el("scan-video"), signal: scanController.signal });
     barcodeValue = raw;
-    const info = describeBarcode(raw);
-    el("barcode-status").className = "status ok";
-    el("barcode-status").textContent =
-      `バーコード ${info.code}（${info.kind}${info.country ? " / " + info.country : ""}` +
-      `${info.valid ? "" : " / チェックディジットが合いません"}）`;
+    showBarcodeStatus();
     runIdentify();
   } catch (error) {
     el("barcode-status").className = "status";
@@ -92,12 +91,28 @@ el("scan").addEventListener("click", async () => {
 
 el("scan-cancel").addEventListener("click", () => scanController?.abort());
 
+function showBarcodeStatus() {
+  const status = el("barcode-status");
+  if (!barcodeValue) {
+    status.className = "status";
+    status.textContent = "";
+    return;
+  }
+  const info = describeBarcode(barcodeValue);
+  status.className = "status ok";
+  status.textContent =
+    `バーコード ${info.code}（${info.kind}${info.country ? " / " + info.country : ""}` +
+    `${info.valid ? "" : " / チェックディジットが合いません"}）`;
+}
+
 el("identify-sample").addEventListener("click", () => {
   el("tag-text").value = TAG_SAMPLE;
   runIdentify();
 });
 
 el("identify").addEventListener("click", runIdentify);
+// スマホでは検索ページを見に行って戻る操作が中心なので、打った端から退避する
+el("tag-text").addEventListener("input", persistDraft);
 
 function runIdentify() {
   const tagText = el("tag-text").value;
@@ -228,6 +243,11 @@ function restoreDraft() {
       area.value = draft.texts[g.key];
       updatePasteHint(area);
     }
+  }
+  // 前回の識別結果をそのまま見られるように組み立て直す
+  if (el("tag-text").value.trim() || barcodeValue) {
+    showBarcodeStatus();
+    runIdentify();
   }
 }
 
@@ -459,7 +479,12 @@ el("save").addEventListener("click", async () => {
   }
 });
 
+let thumbUrls = [];
+
 async function refreshRecords() {
+  // 前回作ったサムネイルの URL を解放してから作り直す
+  thumbUrls.forEach((url) => URL.revokeObjectURL(url));
+  thumbUrls = [];
   let records = [];
   try {
     records = await listRecords(20);
@@ -470,7 +495,7 @@ async function refreshRecords() {
   el("records").innerHTML = records
     .map(
       (r) => `<li>
-      ${r.photo ? `<img class="thumb" src="${URL.createObjectURL(r.photo)}" alt="">` : ""}
+      ${r.photo ? `<img class="thumb" src="${trackThumb(r.photo)}" alt="">` : ""}
       <span class="q">${escapeHtml(r.query || "(名前なし)")}</span>
       <span class="val">${yen(r.summary?.blend?.equalWeightMedian)}</span>
       <span class="when">${new Date(r.createdAt).toLocaleString("ja-JP")}</span>
@@ -484,6 +509,12 @@ async function refreshRecords() {
   document.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", () => removeRecord(b.dataset.del)));
 }
 
+function trackThumb(blob) {
+  const url = URL.createObjectURL(blob);
+  thumbUrls.push(url);
+  return url;
+}
+
 async function openRecord(id) {
   const record = await getRecord(id);
   if (!record) return showMessages(["保存した調査を開けませんでした。"]);
@@ -492,6 +523,7 @@ async function openRecord(id) {
   barcodeValue = record.barcode || "";
   photoBlob = record.photo || null;
   showPhoto();
+  showBarcodeStatus();
   for (const g of DEFAULT_GROUPS) el("text-" + g.key).value = "";
   for (const g of record.groups || []) {
     const area = el("text-" + g.key);
@@ -519,6 +551,7 @@ window.addEventListener("resize", () => {
 });
 
 /* ---------- 起動 ---------- */
+el("version").textContent = APP_VERSION;
 renderPanes();
 restoreDraft();
 showPhoto();
@@ -526,6 +559,16 @@ el("q").addEventListener("input", persistDraft);
 refreshRecords();
 
 if ("serviceWorker" in navigator) {
+  // Service Worker が新しい版に入れ替わったら一度だけ読み込み直す。
+  // 古い JS と新しい HTML が混ざって「ボタンが効かない」状態になるのを防ぐ
+  let reloading = false;
+  if (navigator.serviceWorker.controller) {
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (reloading) return;
+      reloading = true;
+      location.reload();
+    });
+  }
   // オフラインでも開けるよう、アプリ本体をキャッシュする
   window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(() => {}));
 }
