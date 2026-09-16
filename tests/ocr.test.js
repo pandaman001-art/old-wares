@@ -69,3 +69,26 @@ describe("cleanOcrText（日本語の空白詰め）", () => {
     assert.equal(cleanOcrText("サイズ M"), "サイズ M");
   });
 });
+
+describe("cleanOcrText（品番の空白詰め）", () => {
+  it("ハイフンの前の空白を詰める", () => {
+    // 「331 -359039」のまま渡すと品番として拾えない
+    assert.equal(cleanOcrText("331 -359039 (62-06)"), "331-359039 (62-06)");
+  });
+
+  it("ハイフンの後ろの空白も詰める", () => {
+    assert.equal(cleanOcrText("331- 359039"), "331-359039");
+  });
+
+  it("英字と数字の間の空白を詰める", () => {
+    assert.equal(cleanOcrText("ND 91841"), "ND91841");
+  });
+
+  it("普通の英文は詰めない", () => {
+    assert.equal(cleanOcrText("MADE IN CHINA"), "MADE IN CHINA");
+  });
+
+  it("サイズ表記は壊さない", () => {
+    assert.equal(cleanOcrText("SIZE L"), "SIZE L");
+  });
+});

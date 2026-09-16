@@ -4,11 +4,12 @@
 // カメラアプリを起動しないのでシャッター音が鳴らない（日本の端末は
 // カメラアプリ側で音を鳴らす仕様のため）。静かな店内でも使える。
 
+// タグの小さい文字を読むには解像度が要る。取れるだけ大きく要求する
 const DEFAULT_CONSTRAINTS = {
   video: {
     facingMode: { ideal: "environment" },
-    width: { ideal: 1920 },
-    height: { ideal: 1080 },
+    width: { ideal: 3840 },
+    height: { ideal: 2160 },
   },
   audio: false,
 };
@@ -36,10 +37,33 @@ export async function startCamera(video, constraints = DEFAULT_CONSTRAINTS) {
       setTimeout(resolve, 2000);
     });
   }
-  return () => {
-    stream.getTracks().forEach((track) => track.stop());
-    video.srcObject = null;
+  return {
+    stream,
+    stop() {
+      stream.getTracks().forEach((track) => track.stop());
+      video.srcObject = null;
+    },
   };
+}
+
+/**
+ * 写真を撮る。シャッター音は鳴らない（カメラアプリを起動しないため）。
+ *
+ * ImageCapture が使える端末では静止画の解像度で撮る。映像の 1 フレームは
+ * 1080p 程度しかなく、タグの小さい文字はそれでは潰れてしまう。
+ * 使えない端末では従来どおり映像から切り出す。
+ */
+export async function takePhoto(video, stream) {
+  const track = stream?.getVideoTracks?.()[0];
+  if (track && typeof window !== "undefined" && "ImageCapture" in window) {
+    try {
+      const blob = await new window.ImageCapture(track).takePhoto();
+      if (blob?.size) return blob;
+    } catch {
+      // 端末によっては takePhoto が動かない。そのときは映像から切り出す
+    }
+  }
+  return captureFrame(video);
 }
 
 /** いま映っている 1 フレームを JPEG にする。シャッター音は鳴らない。 */

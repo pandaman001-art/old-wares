@@ -1,16 +1,16 @@
 // 画面の組み立てとイベント配線。
 
 import { barcodeSupported, describeBarcode, detectFromVideo } from "./barcode.js";
-import { cameraSupported, captureFrame, startCamera } from "./camera.js";
+import { cameraSupported, startCamera, takePhoto } from "./camera.js";
 import { drawHistogram, SERIES_VARS } from "./chart.js";
 import { buildQueries, identify } from "./identify.js";
 import { readTextFromImage, SHAKY_CONFIDENCE } from "./ocr.js";
-import { shrinkImage } from "./photo.js";
+import { cropImage, shrinkImage } from "./photo.js";
 import { DEFAULT_GROUPS, quote, searchPageUrl } from "./quote.js";
 import { deleteRecord, getRecord, listRecords, loadDraft, saveDraft, saveRecord } from "./store.js";
 
 // 更新が届いたかを画面で確認できるようにする。上げるときは sw.js の CACHE も揃えること
-const APP_VERSION = "v7";
+const APP_VERSION = "v8";
 
 const el = (id) => document.getElementById(id);
 const yen = (n) => (n === null || n === undefined ? "—" : "¥" + Number(n).toLocaleString("ja-JP"));
@@ -25,6 +25,8 @@ let photoBlob = null;
 // OCR は縮小前の写真のほうがよく読めるので、元のまま持っておく（保存はしない）
 let photoOriginal = null;
 let photoUrl = null;
+// 読み取る範囲（写真に対する 0-1 の比率）。指でなぞって決める
+let cropRect = null;
 let barcodeValue = "";
 
 /* ---------- テーマ ---------- */
@@ -52,7 +54,7 @@ el("photo-pick").addEventListener("click", () => el("photo").click());
 // カメラアプリを起動しないのでシャッター音が鳴らない
 if (cameraSupported()) el("photo-camera").hidden = false;
 
-let cameraStop = null;
+let camera = null;
 let shutter = null;
 
 async function openCamera(mode) {
@@ -62,12 +64,12 @@ async function openCamera(mode) {
       : "バーコードを画面に収めてください";
   el("shutter").hidden = mode !== "photo";
   el("scanner").hidden = false;
-  cameraStop = await startCamera(el("scan-video"));
+  camera = await startCamera(el("scan-video"));
 }
 
 function closeCamera() {
-  cameraStop?.();
-  cameraStop = null;
+  camera?.stop();
+  camera = null;
   shutter = null;
   el("scanner").hidden = true;
   el("shutter").hidden = true;
@@ -98,7 +100,7 @@ el("photo-camera").addEventListener("click", async () => {
 el("shutter").addEventListener("click", async () => {
   if (!shutter) return;
   try {
-    shutter(await captureFrame(el("scan-video")));
+    shutter(await takePhoto(el("scan-video"), camera?.stream));
   } catch {
     el("scan-hint").textContent = "まだ映像が来ていません。少し待ってからもう一度押してください。";
   }
@@ -123,13 +125,72 @@ el("photo-clear").addEventListener("click", () => {
 function showPhoto() {
   if (photoUrl) URL.revokeObjectURL(photoUrl);
   photoUrl = photoBlob ? URL.createObjectURL(photoBlob) : null;
-  const preview = el("photo-preview");
-  preview.src = photoUrl || "";
-  preview.hidden = !photoBlob;
+  el("photo-preview").src = photoUrl || "";
+  el("photo-wrap").hidden = !photoBlob;
   el("photo-hint").hidden = !photoBlob;
   el("photo-clear").hidden = !photoBlob;
   el("ocr-actions").hidden = !photoBlob;
+  clearCrop();
 }
+
+/* ---------- 読み取る範囲を指でなぞって決める ---------- */
+function clearCrop() {
+  cropRect = null;
+  el("crop-box").hidden = true;
+  el("crop-clear").hidden = true;
+}
+
+el("crop-clear").addEventListener("click", clearCrop);
+
+(function setupCrop() {
+  const wrap = el("photo-wrap");
+  const box = el("crop-box");
+  let origin = null;
+
+  const place = (event) => {
+    const bounds = el("photo-preview").getBoundingClientRect();
+    const x = Math.min(Math.max(0, event.clientX - bounds.left), bounds.width);
+    const y = Math.min(Math.max(0, event.clientY - bounds.top), bounds.height);
+    const left = Math.min(origin.x, x);
+    const top = Math.min(origin.y, y);
+    const width = Math.abs(x - origin.x);
+    const height = Math.abs(y - origin.y);
+    Object.assign(box.style, {
+      left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px`,
+    });
+    box.hidden = false;
+    return { left, top, width, height, bounds };
+  };
+
+  wrap.addEventListener("pointerdown", (event) => {
+    if (!photoBlob) return;
+    const bounds = el("photo-preview").getBoundingClientRect();
+    origin = { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
+    wrap.setPointerCapture(event.pointerId);
+    // 指でなぞる間にページが動かないようにする
+    event.preventDefault();
+  });
+
+  wrap.addEventListener("pointermove", (event) => {
+    if (origin) place(event);
+  });
+
+  wrap.addEventListener("pointerup", (event) => {
+    if (!origin) return;
+    const { left, top, width, height, bounds } = place(event);
+    origin = null;
+    // 指が滑っただけの小さい範囲は無視する
+    if (width < 16 || height < 16) {
+      clearCrop();
+      return;
+    }
+    cropRect = {
+      x: left / bounds.width, y: top / bounds.height,
+      w: width / bounds.width, h: height / bounds.height,
+    };
+    el("crop-clear").hidden = false;
+  });
+})();
 
 // 写真から文字を読む。エンジンは同梱してあり、最初に押したときだけ読み込む
 const OCR_STEPS = {
@@ -137,6 +198,7 @@ const OCR_STEPS = {
   "initializing tesseract": "読み取りエンジンを準備中",
   "loading language traineddata": "文字データを読み込み中",
   "initializing api": "準備中",
+  "checking orientation": "向きを調べています",
   "recognizing text": "文字を読み取り中",
 };
 
@@ -148,7 +210,9 @@ el("ocr").addEventListener("click", async () => {
   status.className = "status";
   status.textContent = "準備中…（初回は少し時間がかかります）";
   try {
-    const { text, confidence } = await readTextFromImage(photoOriginal || photoBlob, {
+    // 範囲が指定されていればそこだけを切り出す。元の大きい写真から切るほど細かく読める
+    const source = await cropImage(photoOriginal || photoBlob, cropRect);
+    const { text, confidence } = await readTextFromImage(source, {
       japanese: el("ocr-jp").checked,
       onProgress: (message) => {
         const label = OCR_STEPS[message.status];
@@ -160,7 +224,9 @@ el("ocr").addEventListener("click", async () => {
     });
     if (!text) {
       status.className = "status bad";
-      status.textContent = "文字を読み取れませんでした。明るい場所で、タグを大きく写して撮り直してください。";
+      status.textContent = cropRect
+        ? "文字を読み取れませんでした。範囲をタグの文字だけに絞るか、もっと近づいて撮り直してください。"
+        : "文字を読み取れませんでした。タグの部分を指でなぞって囲むと読めることがあります。";
       return;
     }
     const current = el("tag-text").value.trim();
