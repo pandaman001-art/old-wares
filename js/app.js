@@ -8,7 +8,7 @@ import { DEFAULT_GROUPS, quote, searchPageUrl } from "./quote.js";
 import { deleteRecord, getRecord, listRecords, loadDraft, saveDraft, saveRecord } from "./store.js";
 
 // 更新が届いたかを画面で確認できるようにする。上げるときは sw.js の CACHE も揃えること
-const APP_VERSION = "v4";
+const APP_VERSION = "v5";
 
 const el = (id) => document.getElementById(id);
 const yen = (n) => (n === null || n === undefined ? "—" : "¥" + Number(n).toLocaleString("ja-JP"));
@@ -116,11 +116,15 @@ el("tag-text").addEventListener("input", persistDraft);
 
 function runIdentify() {
   const tagText = el("tag-text").value;
+  // 案内は押したボタンのすぐ下に出す。ページ末尾に出すと画面外になり、
+  // 「押しても反応しない」ようにしか見えない
   if (!tagText.trim() && !barcodeValue) {
-    showMessages(["タグに書かれている文字を入れるか、バーコードを読み取ってください。"]);
+    el("identify-status").textContent =
+      "タグに書かれている文字を入れるか、バーコードを読み取ってください。";
+    el("tag-text").focus();
     return;
   }
-  showMessages([]);
+  el("identify-status").textContent = "";
   const found = identify(tagText);
   const queries = buildQueries(found, { barcode: barcodeValue, note: el("q").value });
 
@@ -296,6 +300,7 @@ el("clear").addEventListener("click", () => {
   showPhoto();
   el("tag-text").value = "";
   el("barcode-status").textContent = "";
+  el("identify-status").textContent = "";
   el("identify-result").hidden = true;
   for (const id of ["summary", "source-cards", "chart-card", "table-card"]) el(id).hidden = true;
   showMessages([]);
@@ -332,6 +337,8 @@ function showMessages(list) {
   const box = el("messages");
   box.innerHTML = list.map((m) => `<div class="card banner">${escapeHtml(m)}</div>`).join("");
   box.hidden = list.length === 0;
+  // 出しただけでは画面外のことがあるので、見える位置まで寄せる
+  if (list.length) box.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 /* ---------- 描画 ---------- */
