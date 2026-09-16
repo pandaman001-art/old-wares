@@ -131,6 +131,7 @@
   .identify-grid textarea { min-height: 120px; }
   #photo-preview { display: block; width: 100%; max-width: 260px; border-radius: 8px; border: 1px solid var(--border); margin-top: 8px; }
   .hint { font-size: 12px; margin: 6px 0 0; }
+  .ocr-opt { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
   .chips { display: flex; gap: 8px; flex-wrap: wrap; }
   .chip { display: inline-flex; align-items: baseline; gap: 6px; font-size: 13px;
     border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; background: var(--plane); }
@@ -241,7 +242,12 @@
         </div>
         <input type="file" id="photo" accept="image/*" hidden>
         <img id="photo-preview" alt="取り込んだ写真" hidden>
-        <p class="muted hint" id="photo-hint" hidden>写真は記録用です。画像から自動で商品名は判別しません。</p>
+        <p class="muted hint" id="photo-hint" hidden>写真は端末の中だけで処理します。どこにも送信しません。</p>
+        <div class="pane-actions" id="ocr-actions" hidden>
+          <button type="button" class="ghost small" id="ocr">写真から文字を読む</button>
+          <label class="ocr-opt"><input type="checkbox" id="ocr-jp"> 日本語も読む</label>
+        </div>
+        <div class="status" id="ocr-status"></div>
         <div class="status" id="barcode-status"></div>
       </div>
       <div>
