@@ -93,10 +93,10 @@ export async function detectFromVideo(video, signal) {
 /** カメラを開いてバーコードを 1 つ読む。signal で中断できる。 */
 export async function scanBarcode({ video, signal } = {}) {
   if (!barcodeSupported()) throw new Error("この端末はバーコード読み取りに対応していません");
-  const stop = await startCamera(video);
+  const camera = await startCamera(video);
   try {
     return await detectFromVideo(video, signal);
   } finally {
-    stop();
+    camera.stop();
   }
 }

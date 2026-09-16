@@ -28,7 +28,10 @@ const BRAND_INDEX = BRANDS.flatMap((brand) =>
 // 品番。ND91841 / NP61800-K のような英字＋数字の並び（行をまたがないよう 1 行ずつ見る）
 const MODEL_PATTERNS = [
   /\b[A-Z]{2,4}[- ]?\d{4,7}(?:[- ][A-Z0-9]{1,3})?\b/g,
-  /\b\d{2}[A-Z]{2,3}\d{3,5}\b/g,
+  // 英字と数字が混ざった 5-14 文字の並び（ND91841 / 336N004N など）
+  /\b(?=[A-Z0-9-]{5,14}\b)(?=[A-Z0-9-]*\d)(?=[A-Z0-9-]*[A-Z])[A-Z0-9]+(?:-[A-Z0-9]+)*\b/g,
+  // 数字だけのハイフン付き品番（331-359039 など）。62-06 のような短いものは拾わない
+  /\b\d{3}-\d{4,7}\b/g,
 ];
 // 品番と紛らわしいが品番ではないもの
 const MODEL_DENY = /^(?:JAN|EAN|UPC|NO|LOT|ART|STYLE|COLOR|SIZE|US|EU|UK|JP|FW|SS|AW)$/;
