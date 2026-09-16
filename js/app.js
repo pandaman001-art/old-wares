@@ -1,5 +1,6 @@
 // 画面の組み立てとイベント配線。
 
+import { DEFAULT_MODEL, listModels, readTagWithAi } from "./ai.js";
 import { barcodeSupported, describeBarcode, detectFromVideo } from "./barcode.js";
 import { cameraSupported, startCamera, takePhoto } from "./camera.js";
 import { drawHistogram, SERIES_VARS } from "./chart.js";
@@ -7,10 +8,13 @@ import { buildQueries, identify } from "./identify.js";
 import { readTextFromImage, SHAKY_CONFIDENCE } from "./ocr.js";
 import { cropImage, shrinkImage } from "./photo.js";
 import { DEFAULT_GROUPS, quote, searchPageUrl } from "./quote.js";
-import { deleteRecord, getRecord, listRecords, loadDraft, saveDraft, saveRecord } from "./store.js";
+import {
+  deleteRecord, getRecord, listRecords, loadAiSettings, loadDraft,
+  saveAiSettings, saveDraft, saveRecord,
+} from "./store.js";
 
 // 更新が届いたかを画面で確認できるようにする。上げるときは sw.js の CACHE も揃えること
-const APP_VERSION = "v8";
+const APP_VERSION = "v9";
 
 const el = (id) => document.getElementById(id);
 const yen = (n) => (n === null || n === undefined ? "—" : "¥" + Number(n).toLocaleString("ja-JP"));
@@ -27,6 +31,8 @@ let photoOriginal = null;
 let photoUrl = null;
 // 読み取る範囲（写真に対する 0-1 の比率）。指でなぞって決める
 let cropRect = null;
+// AI が読み取った構造化結果。あれば検索語の組み立てで優先する
+let aiHint = {};
 let barcodeValue = "";
 
 /* ---------- テーマ ---------- */
@@ -202,6 +208,101 @@ const OCR_STEPS = {
   "recognizing text": "文字を読み取り中",
 };
 
+/* ---------- AI で読む（任意・API キーが必要） ---------- */
+// キーで使えると分かったモデル。接続確認で取得するまでは既定だけ
+let availableModels = [];
+
+function aiSettings() {
+  return loadAiSettings() || {};
+}
+
+function refreshAiUi() {
+  const { apiKey, model } = aiSettings();
+  el("ai-read").hidden = !apiKey;
+  el("ai-forget").hidden = !apiKey;
+  el("ai-summary").textContent = apiKey
+    ? `AI で読む（設定済み・${model || DEFAULT_MODEL}）`
+    : "AI で読む（任意・API キーが必要）";
+  if (apiKey && !el("ai-key").value) el("ai-key").value = apiKey;
+  // 取得済みの一覧があればそれを保つ。保存のたびに候補が 1 つへ潰れないように
+  setModelOptions(availableModels, model || DEFAULT_MODEL);
+}
+
+function setModelOptions(names, selected) {
+  const select = el("ai-model");
+  const options = [...new Set([...names, selected, DEFAULT_MODEL].filter(Boolean))];
+  select.innerHTML = options.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
+  select.value = options.includes(selected) ? selected : options[0];
+}
+
+el("ai-save").addEventListener("click", async () => {
+  const apiKey = el("ai-key").value.trim();
+  const status = el("ai-status");
+  if (!apiKey) {
+    status.className = "status bad";
+    status.textContent = "API キーを入れてください。";
+    return;
+  }
+  status.className = "status";
+  status.textContent = "接続を確認しています…";
+  try {
+    // キーが本当に使えるか、モデル一覧を取って確かめる
+    const models = await listModels(apiKey);
+    if (!models.length) throw new Error("このキーで使えるモデルが見つかりませんでした。");
+    availableModels = models;
+    setModelOptions(models, models.includes(DEFAULT_MODEL) ? DEFAULT_MODEL : models[0]);
+    saveAiSettings({ apiKey, model: el("ai-model").value });
+    refreshAiUi();
+    status.className = "status ok";
+    status.textContent = `使えます。${models.length} 個のモデルが見つかりました。`;
+  } catch (error) {
+    status.className = "status bad";
+    status.textContent = error.message;
+  }
+});
+
+el("ai-model").addEventListener("change", () => {
+  const { apiKey } = aiSettings();
+  if (apiKey) {
+    saveAiSettings({ apiKey, model: el("ai-model").value });
+    refreshAiUi();
+  }
+});
+
+el("ai-forget").addEventListener("click", () => {
+  saveAiSettings({});
+  el("ai-key").value = "";
+  el("ai-status").className = "status";
+  el("ai-status").textContent = "キーを削除しました。以降は端末内だけで処理します。";
+  refreshAiUi();
+});
+
+el("ai-read").addEventListener("click", async () => {
+  if (!photoBlob) return;
+  const { apiKey, model } = aiSettings();
+  const button = el("ai-read");
+  const status = el("ocr-status");
+  button.disabled = true;
+  status.className = "status";
+  status.textContent = "AI が読み取っています…";
+  try {
+    const source = await cropImage(photoOriginal || photoBlob, cropRect);
+    const { text, hint } = await readTagWithAi(source, { apiKey, model });
+    aiHint = hint || {};
+    const current = el("tag-text").value.trim();
+    el("tag-text").value = current ? `${current}\n${text}` : text;
+    persistDraft();
+    status.className = "status ok";
+    status.textContent = `AI が ${text.split("\n").filter(Boolean).length} 行読み取りました。間違いは下の欄で直せます。`;
+    runIdentify();
+  } catch (error) {
+    status.className = "status bad";
+    status.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+
 el("ocr").addEventListener("click", async () => {
   if (!photoBlob) return;
   const button = el("ocr");
@@ -212,6 +313,7 @@ el("ocr").addEventListener("click", async () => {
   try {
     // 範囲が指定されていればそこだけを切り出す。元の大きい写真から切るほど細かく読める
     const source = await cropImage(photoOriginal || photoBlob, cropRect);
+    aiHint = {};
     const { text, confidence } = await readTextFromImage(source, {
       japanese: el("ocr-jp").checked,
       onProgress: (message) => {
@@ -304,7 +406,7 @@ function runIdentify() {
     return;
   }
   el("identify-status").textContent = "";
-  const found = identify(tagText);
+  const found = identify(tagText, aiHint);
   const queries = buildQueries(found, { barcode: barcodeValue, note: el("q").value });
 
   const chips = [
@@ -475,6 +577,7 @@ el("clear").addEventListener("click", () => {
   }
   latest = null;
   barcodeValue = "";
+  aiHint = {};
   photoBlob = null;
   photoOriginal = null;
   el("ocr-status").textContent = "";
@@ -713,6 +816,7 @@ async function openRecord(id) {
   barcodeValue = record.barcode || "";
   photoBlob = record.photo || null;
   photoOriginal = null;
+  aiHint = {};
   el("ocr-status").textContent = "";
   showPhoto();
   showBarcodeStatus();
@@ -744,6 +848,7 @@ window.addEventListener("resize", () => {
 
 /* ---------- 起動 ---------- */
 el("version").textContent = APP_VERSION;
+refreshAiUi();
 renderPanes();
 restoreDraft();
 showPhoto();
