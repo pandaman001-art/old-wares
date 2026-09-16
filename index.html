@@ -136,6 +136,11 @@
     background: rgba(235, 104, 52, .18); pointer-events: none; border-radius: 2px; }
   .hint { font-size: 12px; margin: 6px 0 0; }
   .ocr-opt { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+  .ai-box { margin-top: 10px; }
+  .ai-box .hint a { color: var(--series-yahoo); }
+  select { font: inherit; color: var(--text-primary); background: var(--field-bg);
+    border: 1px solid var(--axis); border-radius: 8px; padding: 10px 11px; max-width: 200px; }
+  @media (max-width: 640px) { select { font-size: 16px; } }
   .chips { display: flex; gap: 8px; flex-wrap: wrap; }
   .chip { display: inline-flex; align-items: baseline; gap: 6px; font-size: 13px;
     border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; background: var(--plane); }
@@ -254,11 +259,39 @@
           写真は端末の中だけで処理し、どこにも送信しません。
         </p>
         <div class="pane-actions" id="ocr-actions" hidden>
-          <button type="button" class="ghost small" id="ocr">写真から文字を読む</button>
+          <button type="button" class="small" id="ai-read" hidden>AI で読む</button>
+          <button type="button" class="ghost small" id="ocr">端末内で読む</button>
           <button type="button" class="ghost small" id="crop-clear" hidden>範囲を消す</button>
           <label class="ocr-opt"><input type="checkbox" id="ocr-jp" checked> 日本語も読む</label>
         </div>
         <div class="status" id="ocr-status"></div>
+
+        <details class="adv ai-box">
+          <summary id="ai-summary">AI で読む（任意・API キーが必要）</summary>
+          <p class="muted hint">
+            端末内の読み取りではタグが読めないときに使います。Google の Gemini API を直接呼びます。
+            <strong>写真が Google に送信されます。</strong>無料枠で送ったデータは
+            Google のサービス改善に使われる場合があります。それが困る場合は設定しないでください
+            （設定しなければこれまでどおり端末内だけで処理します）。
+          </p>
+          <p class="muted hint">
+            キーは <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>
+            で無料で取得できます。この端末のブラウザにだけ保存し、保存した調査や CSV には含めません。
+          </p>
+          <div class="row" style="margin-top:8px">
+            <label class="field" style="flex:1 1 240px">API キー
+              <input type="password" id="ai-key" placeholder="AIza..." autocomplete="off" spellcheck="false">
+            </label>
+            <label class="field">モデル
+              <select id="ai-model"></select>
+            </label>
+          </div>
+          <div class="pane-actions" style="margin-top:8px">
+            <button type="button" class="ghost small" id="ai-save">保存して接続を確認</button>
+            <button type="button" class="ghost small" id="ai-forget" hidden>キーを削除</button>
+          </div>
+          <div class="status" id="ai-status"></div>
+        </details>
         <div class="status" id="barcode-status"></div>
       </div>
       <div>
@@ -377,7 +410,8 @@
   </section>
 
   <footer class="note">
-    このアプリは端末の中だけで動きます。外部サイトへ自動アクセスせず、入力した内容もどこにも送信しません。
+    このアプリは端末の中だけで動きます（「AI で読む」を設定したときだけ、その写真が Google に送信されます）。
+    検索サイトへ自動アクセスすることはありません。
     金額はいずれも実際に売れた価格（ヤフオク＝落札価格 / メルカリ＝売り切れ価格）です。送料の扱いは出品ごとに異なります。
     <span id="version" class="version"></span>
   </footer>

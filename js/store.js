@@ -7,6 +7,7 @@ const DB_NAME = "oldwares";
 const DB_VERSION = 1;
 const STORE = "records";
 const DRAFT_KEY = "oldwares.draft";
+const AI_KEY = "oldwares.ai";
 
 let dbPromise = null;
 
@@ -82,6 +83,27 @@ export function saveDraft(draft) {
     localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
   } catch {
     // プライベートウィンドウなどでは保存できない。機能には影響しない
+  }
+}
+
+/**
+ * AI 読み取りの設定（API キーとモデル）。
+ * この端末の localStorage にだけ置く。保存した調査にも CSV にも入れない。
+ */
+export function saveAiSettings(settings) {
+  try {
+    if (settings?.apiKey) localStorage.setItem(AI_KEY, JSON.stringify(settings));
+    else localStorage.removeItem(AI_KEY);
+  } catch {
+    // プライベートウィンドウなどでは保存できない
+  }
+}
+
+export function loadAiSettings() {
+  try {
+    return JSON.parse(localStorage.getItem(AI_KEY) || "null");
+  } catch {
+    return null;
   }
 }
 

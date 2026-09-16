@@ -8,12 +8,13 @@
 //   横断検索してしまい、古い版が残っていると新しい版を配れなくなるため。
 
 // 上げるときは js/app.js の APP_VERSION も揃えること
-const CACHE = "oldwares-v8";
+const CACHE = "oldwares-v9";
 const INDEX = "./index.html";
 const ASSETS = [
   "./",
   INDEX,
   "./manifest.webmanifest",
+  "./js/ai.js",
   "./js/app.js",
   "./js/barcode.js",
   "./js/brands.js",

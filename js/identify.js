@@ -67,8 +67,21 @@ function asSize(token) {
   return value.replace(/\s+/g, "");
 }
 
-/** タグのテキストから、ブランド・品番・サイズなどを取り出す。 */
-export function identify(text) {
+/** ブランド名らしい文字列を、中古サイトで使われる表記に寄せる。分からなければそのまま返す。 */
+export function canonicalBrand(name) {
+  const folded = fold(name || "");
+  if (!folded) return null;
+  const hit = BRAND_INDEX.find((entry) => entry.folded && folded.includes(entry.folded));
+  return hit ? hit.brand.canonical : (name || "").trim() || null;
+}
+
+/**
+ * タグのテキストから、ブランド・品番・サイズなどを取り出す。
+ *
+ * hint は AI に読ませたときの構造化結果。こちらのほうが確かなので優先する。
+ * hint が無ければ従来どおりテキストだけから判定する。
+ */
+export function identify(text, hint = {}) {
   const raw = (text || "").trim();
   const normalized = raw.normalize("NFKC");
   const folded = fold(raw);
@@ -122,7 +135,23 @@ export function identify(text) {
     .filter((word, i, all) => all.indexOf(word) === i)
     .slice(0, 6);
 
-  return { brand, modelNumbers, sizes, madeIn, materials, keywords, raw };
+  const merged = {
+    brand: hint.brand ? { canonical: canonicalBrand(hint.brand), matched: hint.brand } : brand,
+    modelNumbers: hint.modelNumbers?.length ? [...new Set(hint.modelNumbers)] : modelNumbers,
+    sizes: hint.sizes?.length ? [...new Set(hint.sizes)] : sizes,
+    madeIn: hint.madeIn || madeIn,
+    materials: hint.materials?.length ? [...new Set(hint.materials)] : materials,
+    keywords,
+    raw,
+  };
+  // hint で埋まった語は「特徴」から外す（同じ語が二重に入らないように）
+  const consumedByHint = new Set([
+    ...(merged.brand ? fold(merged.brand.canonical).split(" ") : []),
+    ...merged.modelNumbers.map((value) => fold(value)),
+    ...merged.sizes.map((value) => fold(value)),
+  ]);
+  merged.keywords = merged.keywords.filter((word) => !consumedByHint.has(word));
+  return merged;
 }
 
 /**
