@@ -4,12 +4,13 @@ import { barcodeSupported, describeBarcode, detectFromVideo } from "./barcode.js
 import { cameraSupported, captureFrame, startCamera } from "./camera.js";
 import { drawHistogram, SERIES_VARS } from "./chart.js";
 import { buildQueries, identify } from "./identify.js";
+import { readTextFromImage, SHAKY_CONFIDENCE } from "./ocr.js";
 import { shrinkImage } from "./photo.js";
 import { DEFAULT_GROUPS, quote, searchPageUrl } from "./quote.js";
 import { deleteRecord, getRecord, listRecords, loadDraft, saveDraft, saveRecord } from "./store.js";
 
 // 更新が届いたかを画面で確認できるようにする。上げるときは sw.js の CACHE も揃えること
-const APP_VERSION = "v6";
+const APP_VERSION = "v7";
 
 const el = (id) => document.getElementById(id);
 const yen = (n) => (n === null || n === undefined ? "—" : "¥" + Number(n).toLocaleString("ja-JP"));
@@ -21,6 +22,8 @@ let sortKey = "price";
 let sortDir = 1;
 // 商品特定の作業状態。写真は記録用、バーコードとタグ文字が検索語のもとになる
 let photoBlob = null;
+// OCR は縮小前の写真のほうがよく読めるので、元のまま持っておく（保存はしない）
+let photoOriginal = null;
 let photoUrl = null;
 let barcodeValue = "";
 
@@ -78,6 +81,7 @@ el("photo-camera").addEventListener("click", async () => {
       shutter = resolve;
       scanController.signal.addEventListener("abort", () => reject(new Error("撮影を中止しました")));
     });
+    photoOriginal = frame;
     photoBlob = await shrinkImage(frame);
     showPhoto();
     el("barcode-status").className = "status";
@@ -103,6 +107,7 @@ el("shutter").addEventListener("click", async () => {
 el("photo").addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
+  photoOriginal = file;
   photoBlob = await shrinkImage(file);
   showPhoto();
   event.target.value = "";   // 同じ写真をもう一度選べるようにする
@@ -110,6 +115,8 @@ el("photo").addEventListener("change", async (event) => {
 
 el("photo-clear").addEventListener("click", () => {
   photoBlob = null;
+  photoOriginal = null;
+  el("ocr-status").textContent = "";
   showPhoto();
 });
 
@@ -121,7 +128,58 @@ function showPhoto() {
   preview.hidden = !photoBlob;
   el("photo-hint").hidden = !photoBlob;
   el("photo-clear").hidden = !photoBlob;
+  el("ocr-actions").hidden = !photoBlob;
 }
+
+// 写真から文字を読む。エンジンは同梱してあり、最初に押したときだけ読み込む
+const OCR_STEPS = {
+  "loading tesseract core": "読み取りエンジンを準備中",
+  "initializing tesseract": "読み取りエンジンを準備中",
+  "loading language traineddata": "文字データを読み込み中",
+  "initializing api": "準備中",
+  "recognizing text": "文字を読み取り中",
+};
+
+el("ocr").addEventListener("click", async () => {
+  if (!photoBlob) return;
+  const button = el("ocr");
+  const status = el("ocr-status");
+  button.disabled = true;
+  status.className = "status";
+  status.textContent = "準備中…（初回は少し時間がかかります）";
+  try {
+    const { text, confidence } = await readTextFromImage(photoOriginal || photoBlob, {
+      japanese: el("ocr-jp").checked,
+      onProgress: (message) => {
+        const label = OCR_STEPS[message.status];
+        if (label) {
+          const percent = Math.round((message.progress || 0) * 100);
+          status.textContent = `${label}… ${percent}%`;
+        }
+      },
+    });
+    if (!text) {
+      status.className = "status bad";
+      status.textContent = "文字を読み取れませんでした。明るい場所で、タグを大きく写して撮り直してください。";
+      return;
+    }
+    const current = el("tag-text").value.trim();
+    el("tag-text").value = current ? `${current}
+${text}` : text;
+    persistDraft();
+    const shaky = confidence < SHAKY_CONFIDENCE;
+    status.className = shaky ? "status" : "status ok";
+    status.textContent = shaky
+      ? `${text.split("\n").length} 行読み取りましたが、はっきり読めていません（${confidence}%）。下の欄で確かめてください。`
+      : `${text.split("\n").length} 行読み取りました。間違いは下の欄で直せます。`;
+    runIdentify();
+  } catch (error) {
+    status.className = "status bad";
+    status.textContent = `読み取りに失敗しました: ${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
+});
 
 // バーコード読み取りは対応端末でだけ出す（iOS の Safari には標準機能が無い）
 if (barcodeSupported()) el("scan").hidden = false;
@@ -352,10 +410,14 @@ el("clear").addEventListener("click", () => {
   latest = null;
   barcodeValue = "";
   photoBlob = null;
+  photoOriginal = null;
+  el("ocr-status").textContent = "";
   showPhoto();
   el("tag-text").value = "";
   el("barcode-status").textContent = "";
   el("identify-status").textContent = "";
+  el("chips").innerHTML = "";
+  el("queries").innerHTML = "";
   el("identify-result").hidden = true;
   for (const id of ["summary", "source-cards", "chart-card", "table-card"]) el(id).hidden = true;
   showMessages([]);
@@ -584,6 +646,8 @@ async function openRecord(id) {
   el("tag-text").value = record.tagText || "";
   barcodeValue = record.barcode || "";
   photoBlob = record.photo || null;
+  photoOriginal = null;
+  el("ocr-status").textContent = "";
   showPhoto();
   showBarcodeStatus();
   for (const g of DEFAULT_GROUPS) el("text-" + g.key).value = "";

@@ -8,7 +8,7 @@
 //   横断検索してしまい、古い版が残っていると新しい版を配れなくなるため。
 
 // 上げるときは js/app.js の APP_VERSION も揃えること
-const CACHE = "oldwares-v6";
+const CACHE = "oldwares-v7";
 const INDEX = "./index.html";
 const ASSETS = [
   "./",
@@ -21,6 +21,7 @@ const ASSETS = [
   "./js/chart.js",
   "./js/identify.js",
   "./js/normalize.js",
+  "./js/ocr.js",
   "./js/parsing.js",
   "./js/photo.js",
   "./js/quote.js",
@@ -100,8 +101,12 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // コードは常に最新を優先する。古いコードと新しい HTML が混ざるのを避けるため
-  if (/\.(?:js|html|webmanifest)$/.test(url.pathname)) {
+  // 同梱の OCR エンジンは中身が変わらないうえ数 MB あるので、毎回取りに行かない。
+  // vendor/ を除いてから拡張子で判定する
+  const isVendor = url.pathname.includes("/vendor/");
+
+  // アプリのコードは常に最新を優先する。古いコードと新しい HTML が混ざるのを避けるため
+  if (!isVendor && /\.(?:js|html|webmanifest)$/.test(url.pathname)) {
     event.respondWith(networkFirst(request));
     return;
   }
