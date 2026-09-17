@@ -7,7 +7,7 @@
 import { BRANDS } from "./brands.js";
 
 /** 照合用に整える。全角→半角、記号を空白に、大文字化。 */
-function fold(text) {
+export function fold(text) {
   return (text || "")
     .normalize("NFKC")
     .toUpperCase()

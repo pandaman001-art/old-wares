@@ -129,3 +129,86 @@ describe("検索ページのリンク", () => {
     assert.deepEqual(DEFAULT_GROUPS.map((g) => g.key), ["yahoo", "mercari"]);
   });
 });
+
+describe("一致の強さで層別する", () => {
+  const target = { brand: { canonical: "ノースフェイス" }, modelNumbers: ["ND91841"] };
+  const entries = [
+    { title: "THE NORTH FACE ヌプシ ND91841 L", price: 18500 },
+    { title: "ノースフェイス ND-91841 ヌプシ M", price: 17200 },
+    { title: "ノースフェイス ND91841 S", price: 16000 },
+    { title: "ノースフェイス Tシャツ L", price: 2600 },
+    { title: "ノースフェイス マウンテンパーカー M", price: 8800 },
+    { title: "アディダス ジャージ上下", price: 4200 },
+  ];
+  const run = (options) =>
+    quote("ノースフェイス ND91841", [{ key: "yahoo", label: "ヤフオク", entries }],
+      { removeOutliers: false, ...options });
+
+  it("品番が一致した出品だけで相場を出す", () => {
+    const result = run({ target });
+    assert.equal(result.match.tier, "model");
+    assert.equal(result.combined.count, 3);
+    assert.equal(result.combined.median, 17200);
+  });
+
+  it("層ごとの件数を返す", () => {
+    const { counts } = run({ target }).match;
+    assert.equal(counts.model, 3);
+    assert.equal(counts.brand, 2);
+    assert.equal(counts.loose, 1);
+  });
+
+  it("商品を特定していなければ全件で出す（従来どおり）", () => {
+    const result = run({ target: null });
+    assert.equal(result.match.tier, "all");
+    assert.equal(result.match.hasTarget, false);
+    assert.equal(result.combined.count, 6);
+  });
+
+  it("品番一致が足りなければブランド一致まで広げ、そう伝える", () => {
+    const result = quote("ノースフェイス", [{
+      key: "yahoo", label: "ヤフオク",
+      entries: [
+        { title: "THE NORTH FACE ND91841 L", price: 18500 },
+        { title: "ノースフェイス ヌプシ M", price: 15000 },
+        { title: "ノースフェイス パーカー S", price: 9000 },
+        { title: "アディダス ジャージ", price: 4200 },
+      ],
+    }], { target, removeOutliers: false });
+    assert.equal(result.match.tier, "brand");
+    assert.equal(result.combined.count, 3);
+    assert.ok(result.warnings.some((w) => w.includes("ブランド一致まで広げて")));
+  });
+
+  it("どちらも一致しなければ全件に落とし、参考程度だと伝える", () => {
+    const result = quote("ノースフェイス ND91841", [{
+      key: "yahoo", label: "ヤフオク",
+      entries: [
+        { title: "アディダス ジャージ", price: 4200 },
+        { title: "ナイキ スウェット", price: 3800 },
+        { title: "プーマ パーカー", price: 3000 },
+      ],
+    }], { target, removeOutliers: false });
+    assert.equal(result.match.tier, "all");
+    assert.ok(result.warnings.some((w) => w.includes("参考程度")));
+  });
+
+  it("判定に渡す価格は土台にした層のものだけ", () => {
+    const result = run({ target });
+    assert.deepEqual([...result.match.prices].sort((a, b) => a - b), [16000, 17200, 18500]);
+  });
+
+  it("外れ値は土台の中だけで判定する", () => {
+    const withOutlier = quote("ノースフェイス ND91841", [{
+      key: "yahoo", label: "ヤフオク",
+      entries: [
+        ...Array.from({ length: 9 }, (_, i) => ({ title: `ノースフェイス ND91841 ${i}`, price: 17000 + i * 100 })),
+        { title: "ノースフェイス ND91841 バグ", price: 400000 },
+        { title: "アディダス ジャージ", price: 4200 },
+      ],
+    }], { target, removeOutliers: true });
+    assert.equal(withOutlier.sources[0].outlierCount, 1);
+    assert.ok(!withOutlier.match.prices.includes(400000));
+    assert.ok(!withOutlier.match.prices.includes(4200));
+  });
+});

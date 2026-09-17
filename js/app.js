@@ -7,14 +7,16 @@ import { drawHistogram, SERIES_VARS } from "./chart.js";
 import { buildQueries, identify } from "./identify.js";
 import { readTextFromImage, SHAKY_CONFIDENCE } from "./ocr.js";
 import { cropImage, shrinkImage } from "./photo.js";
+import { TIER_LABELS, TIER_MODEL } from "./match.js";
 import { DEFAULT_GROUPS, quote, searchPageUrl } from "./quote.js";
 import {
   deleteRecord, getRecord, listRecords, loadAiSettings, loadDraft,
   saveAiSettings, saveDraft, saveRecord,
 } from "./store.js";
+import { CONDITIONS, DEFAULT_CONDITION, judge } from "./verdict.js";
 
 // 更新が届いたかを画面で確認できるようにする。上げるときは sw.js の CACHE も揃えること
-const APP_VERSION = "v11";
+const APP_VERSION = "v12";
 
 const el = (id) => document.getElementById(id);
 const yen = (n) => (n === null || n === undefined ? "—" : "¥" + Number(n).toLocaleString("ja-JP"));
@@ -34,6 +36,8 @@ let cropRect = null;
 // AI が読み取った構造化結果。あれば検索語の組み立てで優先する
 let aiHint = {};
 let barcodeValue = "";
+// 直近の識別結果。相場を「同じ商品だけ」で出すために quote() に渡す
+let identified = null;
 
 /* ---------- テーマ ---------- */
 el("theme-toggle").addEventListener("click", () => {
@@ -414,6 +418,7 @@ function runIdentify() {
   }
   el("identify-status").textContent = "";
   const found = identify(tagText, aiHint);
+  identified = found;
   const queries = buildQueries(found, { barcode: barcodeValue, note: el("q").value });
 
   const chips = [
@@ -519,6 +524,8 @@ function persistDraft() {
     q: el("q").value,
     tagText: el("tag-text").value,
     barcode: barcodeValue,
+    shopPrice: el("shop-price").value,
+    condition: el("condition").value,
     texts: Object.fromEntries(DEFAULT_GROUPS.map((g) => [g.key, el("text-" + g.key).value])),
   });
 }
@@ -529,6 +536,8 @@ function restoreDraft() {
   el("q").value = draft.q || "";
   el("tag-text").value = draft.tagText || "";
   barcodeValue = draft.barcode || "";
+  el("shop-price").value = draft.shopPrice || "";
+  if (draft.condition) el("condition").value = draft.condition;
   for (const g of DEFAULT_GROUPS) {
     const area = el("text-" + g.key);
     if (area && draft.texts?.[g.key]) {
@@ -555,6 +564,8 @@ function currentOptions() {
     excludeWords: el("exclude").value.split(",").map((s) => s.trim()).filter(Boolean),
     useDefaultExcludes: el("default_excludes").checked,
     removeOutliers: el("remove_outliers").checked,
+    // 目の前の 1 着。これがあると「同じ品番の出品だけ」で相場を出せる
+    target: identified,
   };
 }
 
@@ -585,6 +596,8 @@ el("clear").addEventListener("click", () => {
   latest = null;
   barcodeValue = "";
   aiHint = {};
+  identified = null;
+  el("shop-price").value = "";
   photoBlob = null;
   photoOriginal = null;
   el("ocr-status").textContent = "";
@@ -634,6 +647,87 @@ function showMessages(list) {
   if (list.length) box.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
+/* ---------- 値札の妥当性を見る ---------- */
+// 相場は材料のひとつ。数字だけで決めないよう、判定と一緒に根拠と当てにならなさも出す
+el("condition").innerHTML = CONDITIONS
+  .map((c) => `<option value="${c.key}"${c.key === DEFAULT_CONDITION ? " selected" : ""}>${escapeHtml(c.label)}</option>`)
+  .join("");
+
+for (const id of ["shop-price", "condition"]) {
+  el(id).addEventListener("input", () => {
+    if (latest) renderVerdict(latest);
+    persistDraft();
+  });
+}
+
+function renderVerdict(result) {
+  const box = el("verdict");
+  const empty = el("verdict-empty");
+  const raw = el("shop-price").value.trim();
+
+  if (!raw) {
+    box.hidden = true;
+    empty.hidden = false;
+    empty.textContent = "値札の金額を「2. 相場を調べる」に入れると、この相場と突き合わせて妥当かどうかを出します。";
+    return;
+  }
+
+  const verdict = judge({
+    shopPrice: Number(raw),
+    prices: result.match?.prices || [],
+    condition: el("condition").value,
+    tier: result.match?.tier || "all",
+    anchor: result.blend?.equalWeightMedian ?? result.combined?.median ?? null,
+  });
+
+  if (!verdict.ok) {
+    box.hidden = true;
+    empty.hidden = false;
+    empty.textContent = verdict.reason;
+    return;
+  }
+
+  empty.hidden = true;
+  box.hidden = false;
+  const badge = el("verdict-badge");
+  badge.textContent = verdict.verdict.label;
+  badge.className = "verdict-badge " + verdict.verdict.tone;
+  el("verdict-line").textContent =
+    `${yen(verdict.shopPrice)} は、${verdict.condition.label}の相場 ${yen(verdict.target)} の ${Math.round(verdict.ratio * 100)}% です。`;
+  el("verdict-sub").textContent =
+    verdict.confidence.level === "low"
+      ? "ただしこの相場は当てになりません。下の材料を見て、実物で判断してください。"
+      : "相場は材料のひとつです。下の材料と実物を合わせて決めてください。";
+
+  el("factors").innerHTML = verdict.factors
+    .map((f) => `<li class="${f.tone}">
+        <div class="f-k">${escapeHtml(f.label)}</div>
+        <div class="f-v">${escapeHtml(f.value)}</div>
+        <div class="f-n">${escapeHtml(f.note)}</div>
+      </li>`)
+    .join("");
+  el("offbook").innerHTML = verdict.offBook.map((t) => `<li>${escapeHtml(t)}</li>`).join("");
+}
+
+/** 何を土台に計算したかの一行。相場の数字より先に、素性を分かるようにする。 */
+function renderBasis(result) {
+  const match = result.match;
+  const note = el("basis-note");
+  if (!match) { note.textContent = ""; return; }
+  if (!match.hasTarget) {
+    note.textContent =
+      `貼り付けた全 ${match.count} 件で計算しています。上の「1. 商品を特定する」でタグを読ませると、` +
+      "同じ品番の出品だけに絞れます。";
+    return;
+  }
+  const parts = [
+    `品番まで一致 ${match.counts.model} 件`,
+    `ブランドのみ ${match.counts.brand} 件`,
+    `手がかりなし ${match.counts.loose} 件`,
+  ];
+  note.textContent = `${TIER_LABELS[match.tier] || "全件"}の ${match.count} 件で計算（内訳: ${parts.join(" / ")}）`;
+}
+
 /* ---------- 描画 ---------- */
 function render(result) {
   showMessages(result.warnings);
@@ -648,11 +742,11 @@ function render(result) {
   if (has) {
     el("hero").textContent = yen(blend.equalWeightMedian ?? combined.median);
     el("hero-sub").textContent =
-      `よくある価格帯 ${yen(combined.p25)} 〜 ${yen(combined.p75)}（全 ${combined.count} 件の中央 50%）`;
+      `よくある価格帯 ${yen(combined.p25)} 〜 ${yen(combined.p75)}（対象 ${combined.count} 件の中央 50%）`;
     el("tiles").innerHTML = [
-      ["全件の中央値", yen(combined.median)],
-      ["全件の平均", yen(blend.weightedMean ?? combined.mean)],
-      ["有効データ", combined.count + " 件"],
+      ["中央値", yen(combined.median)],
+      ["平均", yen(blend.weightedMean ?? combined.mean)],
+      ["対象データ", combined.count + " 件"],
       ["最安 / 最高", `${yen(combined.min)} / ${yen(combined.max)}`],
     ]
       .map(([k, v]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`)
@@ -671,6 +765,10 @@ function render(result) {
     }
   }
 
+  if (has) {
+    renderBasis(result);
+    renderVerdict(result);
+  }
   renderSources(result);
   if (has) drawHistogram(result, el("hist"), el("tip"), el("legend"));
   renderTable(result);
@@ -701,7 +799,8 @@ function renderSources(result) {
 function rowsOf(result, includeExcluded) {
   const labels = Object.fromEntries(result.sources.map((s) => [s.source, s.label]));
   const rows = result.sources.flatMap((s) => s.listings.map((x) => ({ ...x, label: labels[s.source] })));
-  return includeExcluded ? rows : rows.filter((x) => !x.excluded);
+  // 相場の土台にした明細だけを既定で見せる。ブランド違い・品番違いは「除外分」側
+  return includeExcluded ? rows : rows.filter((x) => x.inBasis);
 }
 
 function renderTable(result) {
@@ -718,12 +817,19 @@ function renderTable(result) {
       <td>${escapeHtml(x.label || x.source)}</td>
       <td class="title">${escapeHtml(x.title || "（商品名なし）")}</td>
       <td class="num">${yen(x.price)}</td>
-      <td>${x.excluded ? `<span class="tag">${escapeHtml(x.excludeReason || "除外")}</span>` : "使用"}</td>
+      <td><span class="tag ${x.tier || ""}">${escapeHtml(TIER_LABELS[x.tier] || "—")}</span></td>
+      <td>${
+        x.excluded
+          ? `<span class="tag">${escapeHtml(x.excludeReason || "除外")}</span>`
+          : x.inBasis
+            ? "使用"
+            : `<span class="tag">相場の対象外</span>`
+      }</td>
     </tr>`
     )
     .join("");
   el("table-note").textContent =
-    `${rows.length} 件を表示${rows.length > 500 ? "（先頭 500 件まで）" : ""}。灰色の行は統計から除外した明細です。`;
+    `${rows.length} 件を表示${rows.length > 500 ? "（先頭 500 件まで）" : ""}。灰色の行は統計から除外した明細です。「一致」は目の前の 1 着とどこまで同じかを表します。`;
 }
 
 el("show-excluded").addEventListener("change", () => latest && renderTable(latest));
@@ -739,9 +845,12 @@ document.querySelectorAll("#table th[data-sort]").forEach((th) =>
 el("csv").addEventListener("click", () => {
   if (!latest) return;
   const cell = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const lines = [["入力元", "商品名", "価格", "統計に使用", "除外理由"].map(cell).join(",")];
+  const lines = [["入力元", "商品名", "価格", "一致", "相場に使用", "除外理由"].map(cell).join(",")];
   for (const row of rowsOf(latest, true)) {
-    lines.push([row.label, row.title, row.price, row.excluded ? "no" : "yes", row.excludeReason || ""].map(cell).join(","));
+    lines.push([
+      row.label, row.title, row.price,
+      TIER_LABELS[row.tier] || "", row.inBasis ? "yes" : "no", row.excludeReason || "",
+    ].map(cell).join(","));
   }
   // Excel で文字化けしないよう BOM 付きにする
   const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
@@ -766,9 +875,12 @@ el("save").addEventListener("click", async () => {
       photo: photoBlob,
       tagText: el("tag-text").value,
       barcode: barcodeValue,
+      shopPrice: el("shop-price").value,
+      condition: el("condition").value,
       summary: {
         blend: latest.blend,
         combined: latest.combined,
+        match: latest.match ? { tier: latest.match.tier, counts: latest.match.counts, count: latest.match.count } : null,
         perSource: latest.sources.map((s) => ({ source: s.source, label: s.label, median: s.stats.median, count: s.stats.count })),
       },
     });
@@ -828,6 +940,8 @@ async function openRecord(id) {
   showPhoto();
   showBarcodeStatus();
   for (const g of DEFAULT_GROUPS) el("text-" + g.key).value = "";
+  el("shop-price").value = record.shopPrice || "";
+  if (record.condition) el("condition").value = record.condition;
   for (const g of record.groups || []) {
     const area = el("text-" + g.key);
     if (area) {
@@ -835,6 +949,9 @@ async function openRecord(id) {
       updatePasteHint(area);
     }
   }
+  // 保存したときと同じ層で計算するために、タグから商品を特定し直す
+  identified = null;
+  if (el("tag-text").value.trim() || barcodeValue) runIdentify();
   calculate();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }

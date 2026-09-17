@@ -50,10 +50,15 @@ export function newId(now = new Date()) {
 }
 
 /** 貼り付け内容ごと保存する。後から開き直して再計算できる。 */
-export async function saveRecord({ query, groups, summary, note = "", photo = null, tagText = "", barcode = "" }) {
+export async function saveRecord({
+  query, groups, summary, note = "", photo = null, tagText = "", barcode = "",
+  shopPrice = "", condition = "",
+}) {
   const record = {
     id: newId(), query, createdAt: new Date().toISOString(),
     groups, summary, note, photo, tagText, barcode,
+    // 店頭で見た値段と実物の状態。開き直したときに同じ判定が出るように
+    shopPrice, condition,
   };
   await transact("readwrite", (store) => store.put(record));
   return record;
