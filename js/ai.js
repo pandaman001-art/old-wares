@@ -52,7 +52,10 @@ async function toBase64Jpeg(blob) {
 /** API の失敗を、画面にそのまま出せる日本語にする。 */
 function describeError(status, payload) {
   const message = payload?.error?.message || "";
-  if (status === 400 && /API key/i.test(message)) return "API キーが正しくありません。設定を確認してください。";
+  if (status === 400 && /API key/i.test(message)) {
+    return "このキーは受け付けられませんでした。Google AI Studio の「Create API key」で出る文字列か確認してください"
+      + "（プロジェクト ID やクライアント シークレットでは動きません）。";
+  }
   if (status === 403) return "API キーにこのモデルを使う権限がありません。";
   if (status === 429) return "無料枠の上限に達しました。しばらく待つか、端末内の読み取りを使ってください。";
   if (status >= 500) return "相手側のサーバーが混み合っています。少し待って試してください。";
