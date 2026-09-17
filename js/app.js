@@ -14,7 +14,7 @@ import {
 } from "./store.js";
 
 // 更新が届いたかを画面で確認できるようにする。上げるときは sw.js の CACHE も揃えること
-const APP_VERSION = "v9";
+const APP_VERSION = "v10";
 
 const el = (id) => document.getElementById(id);
 const yen = (n) => (n === null || n === undefined ? "—" : "¥" + Number(n).toLocaleString("ja-JP"));
