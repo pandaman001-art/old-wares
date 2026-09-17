@@ -8,7 +8,7 @@
 //   横断検索してしまい、古い版が残っていると新しい版を配れなくなるため。
 
 // 上げるときは js/app.js の APP_VERSION も揃えること
-const CACHE = "oldwares-v11";
+const CACHE = "oldwares-v12";
 const INDEX = "./index.html";
 const ASSETS = [
   "./",
@@ -21,6 +21,7 @@ const ASSETS = [
   "./js/camera.js",
   "./js/chart.js",
   "./js/identify.js",
+  "./js/match.js",
   "./js/normalize.js",
   "./js/ocr.js",
   "./js/parsing.js",
@@ -28,6 +29,7 @@ const ASSETS = [
   "./js/quote.js",
   "./js/stats.js",
   "./js/store.js",
+  "./js/verdict.js",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./icons/icon-maskable-512.png",

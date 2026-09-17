@@ -6,8 +6,8 @@
 <title>old-wares — 中古服の相場</title>
 <meta name="description" content="ヤフオクとメルカリの検索結果を貼り付けて中古服の相場を出す">
 <link rel="manifest" href="./manifest.webmanifest">
-<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f9f9f7">
-<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0d0d0d">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ece3d2">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14110d">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="相場">
@@ -15,168 +15,293 @@
 <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
 <link rel="icon" href="./icons/icon-192.png" sizes="192x192">
 <style>
+  /* ---------------------------------------------------------------
+     配色はアメカジ（デニムのインディゴ／ラストオレンジ／生成りキャンバス）。
+     グラフの 2 系列は dataviz のバリデータに通してある:
+       light  #2d5f9e / #c2551f  surface #f8f2e6 → 全項目 PASS（CVD ΔE 20.0）
+       dark   #5f93d2 / #d2662e  surface #221d17 → 全項目 PASS（CVD ΔE 22.6）
+     状態色（good/warning/critical）は固定で、必ず文言とセットで出す。
+     --------------------------------------------------------------- */
   :root {
     color-scheme: light;
-    --plane:          #f9f9f7;
-    --surface-1:      #fcfcfb;
-    --text-primary:   #0b0b0b;
-    --text-secondary: #52514e;
-    --text-muted:     #898781;
-    --grid:           #e1e0d9;
-    --axis:           #c3c2b7;
-    --border:         rgba(11, 11, 11, 0.10);
-    --series-yahoo:   #2a78d6;
-    --series-mercari: #eb6834;
+    --plane:          #ece3d2;
+    --surface-1:      #f8f2e6;
+    --surface-2:      #e5dac4;
+    --text-primary:   #241c14;
+    --text-secondary: #5c4b39;
+    --text-muted:     #8d7a62;
+    --grid:           #dbcdb2;
+    --axis:           #bda98a;
+    --border:         rgba(36, 28, 20, 0.20);
+    --hairline:       rgba(36, 28, 20, 0.13);
+    --series-yahoo:   #2d5f9e;
+    --series-mercari: #c2551f;
+    --tab:            #a8271f;   /* 赤タブ */
     --critical:       #d03b3b;
     --warning:        #fab219;
     --good:           #0ca30c;
-    --field-bg:       #ffffff;
+    --field-bg:       #fffdf6;
+    --weave:          rgba(36, 28, 20, 0.030);
   }
   @media (prefers-color-scheme: dark) {
     :root:where(:not([data-theme="light"])) {
       color-scheme: dark;
-      --plane:          #0d0d0d;
-      --surface-1:      #1a1a19;
-      --text-primary:   #ffffff;
-      --text-secondary: #c3c2b7;
-      --text-muted:     #898781;
-      --grid:           #2c2c2a;
-      --axis:           #383835;
-      --border:         rgba(255, 255, 255, 0.10);
-      --series-yahoo:   #3987e5;
-      --series-mercari: #d95926;
-      --field-bg:       #111110;
+      --plane:          #14110d;
+      --surface-1:      #221d17;
+      --surface-2:      #2c251d;
+      --text-primary:   #f3ebdd;
+      --text-secondary: #c3b096;
+      --text-muted:     #8d7a62;
+      --grid:           #332b21;
+      --axis:           #473a2c;
+      --border:         rgba(243, 235, 221, 0.16);
+      --hairline:       rgba(243, 235, 221, 0.10);
+      --series-yahoo:   #5f93d2;
+      --series-mercari: #d2662e;
+      --tab:            #cf4a3c;
+      --field-bg:       #191510;
+      --weave:          rgba(243, 235, 221, 0.028);
     }
   }
   :root[data-theme="dark"] {
     color-scheme: dark;
-    --plane:          #0d0d0d;
-    --surface-1:      #1a1a19;
-    --text-primary:   #ffffff;
-    --text-secondary: #c3c2b7;
-    --text-muted:     #898781;
-    --grid:           #2c2c2a;
-    --axis:           #383835;
-    --border:         rgba(255, 255, 255, 0.10);
-    --series-yahoo:   #3987e5;
-    --series-mercari: #d95926;
-    --field-bg:       #111110;
+    --plane:          #14110d;
+    --surface-1:      #221d17;
+    --surface-2:      #2c251d;
+    --text-primary:   #f3ebdd;
+    --text-secondary: #c3b096;
+    --text-muted:     #8d7a62;
+    --grid:           #332b21;
+    --axis:           #473a2c;
+    --border:         rgba(243, 235, 221, 0.16);
+    --hairline:       rgba(243, 235, 221, 0.10);
+    --series-yahoo:   #5f93d2;
+    --series-mercari: #d2662e;
+    --tab:            #cf4a3c;
+    --field-bg:       #191510;
+    --weave:          rgba(243, 235, 221, 0.028);
+  }
+
+  /* 見出しとロゴだけスラブ寄りの書体にする。日本語本文は素の UI 書体のまま */
+  :root {
+    --display: "Rockwell", "Bookman Old Style", "Roboto Slab", Georgia, "Times New Roman", serif;
+    --body: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
   }
 
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    background: var(--plane);
     color: var(--text-primary);
-    font: 14px/1.6 system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+    font: 14px/1.6 var(--body);
     -webkit-text-size-adjust: 100%;
+    background-color: var(--plane);
+    /* キャンバスの織り目。薄く斜めに 2 本入れるだけで紙の質感が出る */
+    background-image:
+      repeating-linear-gradient(45deg,  var(--weave) 0 1px, transparent 1px 4px),
+      repeating-linear-gradient(-45deg, var(--weave) 0 1px, transparent 1px 4px);
   }
-  /* ホーム画面から起動したときに、ノッチやホームバーに隠れないようにする */
   .wrap {
     max-width: 1040px;
     margin: 0 auto;
     padding: calc(20px + env(safe-area-inset-top, 0px)) 16px calc(64px + env(safe-area-inset-bottom, 0px));
   }
 
-  header.top { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
-  header.top h1 { font-size: 20px; margin: 0; }
+  /* ---- ヘッダー（織りネーム風） ---- */
+  header.top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+  header.top h1 {
+    font: 700 21px/1 var(--display);
+    margin: 0; letter-spacing: .10em; text-transform: uppercase;
+    padding: 9px 13px 8px;
+    color: var(--surface-1);
+    background: var(--series-yahoo);
+    border: 1px solid rgba(0, 0, 0, .35);
+    border-radius: 2px;
+    position: relative;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22), inset 0 -2px 0 rgba(0, 0, 0, .16);
+  }
+  /* リーバイスの赤タブのつもり */
+  header.top h1::after {
+    content: ""; position: absolute; right: -3px; top: 50%; width: 9px; height: 15px;
+    transform: translateY(-50%); background: var(--tab); border-radius: 0 2px 2px 0;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .3);
+  }
   header.top p { margin: 0; color: var(--text-secondary); font-size: 13px; }
   .spacer { flex: 1 1 auto; }
 
-  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  /* ---- 下げ札風のカード ---- */
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 18px;
+    /* 縁から 5px 内側にもう 1 本。値札やパッチの二重罫 */
+    box-shadow: inset 0 0 0 4px var(--surface-1), inset 0 0 0 5px var(--hairline);
+  }
   .card + .card { margin-top: 16px; }
 
-  .steps { margin: 0 0 14px; padding-left: 1.2em; color: var(--text-secondary); font-size: 13px; }
+  /* ステッチ（破線）の仕切り */
+  .stitch { border-top: 1px dashed var(--axis); margin: 16px 0; }
+
+  h2, .chart-head h2 {
+    font: 700 13px/1.3 var(--body);
+    margin: 0; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--text-secondary);
+    display: flex; align-items: center; gap: 8px;
+  }
+  h2::before {
+    content: ""; width: 7px; height: 7px; flex: none; border-radius: 1px;
+    background: var(--series-mercari);
+  }
+  .steps { margin: 10px 0 14px; padding-left: 1.2em; color: var(--text-secondary); font-size: 13px; }
   .steps li { margin: 2px 0; }
 
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .row.grow > input[type=text] { flex: 1 1 280px; min-width: 0; }
-  label.field { display: inline-flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
-  input[type=text], input[type=number], textarea {
-    font: inherit; color: var(--text-primary); background: var(--field-bg);
-    border: 1px solid var(--axis); border-radius: 8px; padding: 10px 11px;
+  label.field {
+    display: inline-flex; flex-direction: column; gap: 4px;
+    font: 600 11px/1.4 var(--body); letter-spacing: .08em; text-transform: uppercase;
+    color: var(--text-secondary);
   }
-  /* iOS で入力時に画面が拡大しないよう、フォントは 16px 以上にする */
+  input[type=text], input[type=number], textarea, select {
+    font: 14px/1.5 var(--body); color: var(--text-primary); background: var(--field-bg);
+    border: 1px solid var(--axis); border-radius: 2px; padding: 10px 11px;
+  }
   @media (max-width: 640px) {
-    input[type=text], input[type=number], textarea { font-size: 16px; }
+    input[type=text], input[type=number], textarea, select { font-size: 16px; }
   }
-  input[type=number] { width: 120px; }
-  textarea { width: 100%; min-height: 150px; resize: vertical; line-height: 1.5; }
-  input:focus-visible, button:focus-visible, textarea:focus-visible, summary:focus-visible {
-    outline: 2px solid var(--series-yahoo); outline-offset: 2px;
+  input[type=number] { width: 130px; }
+  textarea { width: 100%; min-height: 150px; resize: vertical; }
+  select { max-width: 220px; }
+  input:focus-visible, button:focus-visible, textarea:focus-visible, summary:focus-visible, select:focus-visible {
+    outline: 2px solid var(--series-mercari); outline-offset: 2px;
   }
+
+  /* ---- ボタン（ワークウェアのタグ） ---- */
   button {
-    font: inherit; font-weight: 600; cursor: pointer; border-radius: 8px;
-    padding: 10px 18px; min-height: 44px;   /* 指で押せる大きさ */
-    border: 1px solid var(--series-yahoo); background: var(--series-yahoo); color: #fff;
+    font: 600 14px/1 var(--body); cursor: pointer; border-radius: 2px;
+    padding: 12px 18px; min-height: 44px;
+    letter-spacing: .04em;
+    border: 1px solid rgba(0, 0, 0, .35); background: var(--series-yahoo); color: #fff;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22), inset 0 -2px 0 rgba(0, 0, 0, .15);
   }
-  button.ghost { background: transparent; color: var(--text-primary); border-color: var(--axis); font-weight: 500; }
-  button.small { padding: 6px 12px; min-height: 36px; font-size: 13px; }
-  button.link { background: none; border: none; color: var(--series-yahoo); padding: 6px 8px; min-height: 36px; font-weight: 500; }
+  button:active { box-shadow: inset 0 2px 3px rgba(0, 0, 0, .28); }
+  button.ghost {
+    background: var(--surface-2); color: var(--text-primary);
+    border-color: var(--axis); box-shadow: none; font-weight: 500;
+  }
+  button.small { padding: 7px 12px; min-height: 36px; font-size: 13px; }
+  button.link { background: none; border: none; color: var(--series-yahoo); padding: 6px 8px; min-height: 36px; font-weight: 600; box-shadow: none; }
+  button[disabled] { opacity: .55; cursor: default; }
   .checks { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); }
   .checks label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
-  details.adv summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; padding: 6px 0; }
+  details.adv summary {
+    cursor: pointer; color: var(--text-secondary); padding: 6px 0;
+    font: 600 12px/1.5 var(--body); letter-spacing: .06em;
+  }
   details.adv[open] summary { margin-bottom: 10px; }
 
   .panes { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; margin-top: 14px; }
-  .pane h3 { margin: 0 0 6px; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .pane h3 { margin: 0 0 6px; font: 600 12px/1.4 var(--body); letter-spacing: .08em; text-transform: uppercase;
+    display: flex; align-items: center; gap: 8px; color: var(--text-secondary); }
   .pane-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
-  .swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .swatch { width: 10px; height: 10px; border-radius: 1px; flex: none; }
   .pane .status { font-size: 12px; color: var(--text-secondary); min-height: 1.6em; margin-top: 4px; }
   .pane .status.ok { color: var(--good); }
   .pane .status.bad { color: var(--critical); }
 
-  /* 商品を特定するカード */
+  /* ---- 値札の入力 ---- */
+  .pricetag {
+    margin-top: 14px; padding: 13px 14px 10px;
+    background: var(--surface-2); border: 1px dashed var(--axis); border-radius: 2px;
+    display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap;
+  }
+  .pricetag-k {
+    font: 700 11px/1.4 var(--body); letter-spacing: .14em; text-transform: uppercase;
+    color: var(--text-secondary); align-self: center;
+  }
+  .pricetag .hint { flex: 1 1 100%; margin: 2px 0 0; }
+
+  /* ---- 判定 ---- */
+  .verdict-head { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  .verdict-badge {
+    font: 700 20px/1 var(--display); letter-spacing: .08em;
+    padding: 13px 18px; border-radius: 2px; border: 2px solid currentColor; flex: none;
+    text-transform: uppercase;
+  }
+  .verdict-badge.good     { color: var(--good); }
+  .verdict-badge.neutral  { color: var(--series-yahoo); }
+  .verdict-badge.warning  { color: var(--series-mercari); }
+  .verdict-badge.critical { color: var(--critical); }
+  .verdict-text { min-width: 0; }
+  .verdict-line { font-size: 15px; font-weight: 600; }
+  .verdict-sub { font-size: 13px; color: var(--text-secondary); margin-top: 3px; }
+  .factors { list-style: none; margin: 14px 0 0; padding: 0; display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+  .factors li { border-left: 3px solid var(--axis); padding: 2px 0 2px 10px; }
+  .factors li.good     { border-left-color: var(--good); }
+  .factors li.warning  { border-left-color: var(--warning); }
+  .factors li.critical { border-left-color: var(--critical); }
+  .factors .f-k { font: 600 11px/1.4 var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--text-secondary); }
+  .factors .f-v { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .factors .f-n { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+  .offbook-box { margin-top: 12px; }
+  .offbook { margin: 0; padding-left: 1.2em; font-size: 13px; color: var(--text-secondary); }
+  .offbook li { margin: 3px 0; }
+  .verdict-empty { font-size: 13px; margin: 0; }
+  .basis-note { font-size: 12px; margin: 12px 0 0; }
+
+  /* ---- 商品を特定するカード ---- */
   .identify-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
   .identify-grid textarea { min-height: 120px; }
   .photo-wrap { position: relative; display: inline-block; width: 100%; max-width: 320px;
     margin-top: 8px; touch-action: none; cursor: crosshair; }
-  #photo-preview { display: block; width: 100%; border-radius: 8px; border: 1px solid var(--border); }
+  #photo-preview { display: block; width: 100%; border-radius: 2px; border: 1px solid var(--border); }
   .crop-box { position: absolute; border: 2px solid var(--series-mercari);
-    background: rgba(235, 104, 52, .18); pointer-events: none; border-radius: 2px; }
+    background: rgba(194, 85, 31, .20); pointer-events: none; border-radius: 1px; }
   .hint { font-size: 12px; margin: 6px 0 0; }
   .ocr-opt { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
   .ai-box { margin-top: 10px; }
   .ai-box .hint a { color: var(--series-yahoo); }
-  select { font: inherit; color: var(--text-primary); background: var(--field-bg);
-    border: 1px solid var(--axis); border-radius: 8px; padding: 10px 11px; max-width: 200px; }
-  @media (max-width: 640px) { select { font-size: 16px; } }
   .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  /* 織りネーム風のチップ */
   .chip { display: inline-flex; align-items: baseline; gap: 6px; font-size: 13px;
-    border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; background: var(--plane); }
+    border: 1px solid var(--axis); border-radius: 2px; padding: 4px 11px; background: var(--surface-2); }
   .chip b { font-weight: 600; }
-  .chip .k { font-size: 11px; color: var(--text-secondary); }
+  .chip .k { font: 600 10px/1.4 var(--body); letter-spacing: .1em; text-transform: uppercase; color: var(--text-secondary); }
   .queries { display: flex; flex-direction: column; gap: 6px; }
   .queries button {
     display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; width: 100%; text-align: left;
-    background: transparent; color: var(--text-primary); border: 1px solid var(--axis); font-weight: 500;
+    background: var(--surface-2); color: var(--text-primary); border: 1px solid var(--axis);
+    font-weight: 500; box-shadow: none;
   }
   .queries button .qtext { font-weight: 600; }
   .queries button .qlabel { font-size: 12px; color: var(--text-secondary); }
-  .queries button:first-child { border-color: var(--series-yahoo); }
+  .queries button:first-child { border-color: var(--series-yahoo); border-left-width: 4px; }
 
-  /* バーコード読み取りのカメラ画面 */
+  /* ---- バーコード読み取りのカメラ画面 ---- */
   .scanner {
     position: fixed; inset: 0; z-index: 50; background: #000;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
     padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(16px + env(safe-area-inset-bottom, 0px));
   }
-  .scanner video { width: 100%; max-width: 560px; border-radius: 10px; background: #111; }
+  .scanner video { width: 100%; max-width: 560px; border-radius: 3px; background: #111; }
   .scanner p { color: #fff; font-size: 13px; margin: 0; text-align: center; max-width: 520px; padding: 0 8px; }
   .scanner-actions { display: flex; gap: 12px; align-items: center; }
-  .scanner-actions .ghost { color: #fff; border-color: rgba(255, 255, 255, .5); }
+  .scanner-actions .ghost { color: #fff; border-color: rgba(255, 255, 255, .5); background: transparent; }
 
+  /* ---- 結果 ---- */
   .headline { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-end; }
-  .hero-label { font-size: 12px; color: var(--text-secondary); letter-spacing: .04em; }
-  .hero-value { font-size: 40px; font-weight: 650; line-height: 1.1; letter-spacing: -.01em; }
+  .hero-label { font: 600 11px/1.4 var(--body); letter-spacing: .12em; text-transform: uppercase; color: var(--text-secondary); }
+  .hero-value { font: 700 42px/1.05 var(--display); letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
   .hero-sub { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
   .tiles { display: flex; gap: 24px; flex-wrap: wrap; }
-  .tile .k { font-size: 12px; color: var(--text-secondary); }
-  .tile .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tile .k { font: 600 11px/1.4 var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--text-secondary); }
+  .tile .v { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
 
   .sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
-  .src { border: 1px solid var(--border); border-radius: 10px; padding: 13px 14px; }
-  .src h3 { margin: 0 0 8px; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+  .src { border: 1px solid var(--border); border-radius: 2px; padding: 13px 14px; background: var(--surface-2); }
+  .src h3 { margin: 0 0 8px; font: 600 12px/1.4 var(--body); letter-spacing: .08em; text-transform: uppercase;
+    display: flex; align-items: center; gap: 8px; }
   .src dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 13px; }
   .src dt { color: var(--text-secondary); }
   .src dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
@@ -185,16 +310,15 @@
   .src .err { margin-top: 8px; font-size: 12px; color: var(--critical); }
 
   .chart-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
-  .chart-head h2 { font-size: 15px; margin: 0; }
   .legend { display: flex; gap: 14px; font-size: 12px; color: var(--text-secondary); }
   .legend span { display: inline-flex; align-items: center; gap: 6px; }
   .chart-box { position: relative; }
   svg.hist { display: block; width: 100%; height: auto; }
   .tip {
     position: absolute; pointer-events: none; opacity: 0; transition: opacity .09s;
-    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+    background: var(--surface-1); border: 1px solid var(--axis); border-radius: 2px;
     padding: 8px 10px; font-size: 12px; min-width: 150px;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, .14); z-index: 5;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, .20); z-index: 5;
   }
   .tip .line { display: flex; justify-content: space-between; gap: 14px; margin-top: 3px; color: var(--text-secondary); }
   .tip .line em { font-style: normal; color: var(--text-primary); font-variant-numeric: tabular-nums; }
@@ -204,20 +328,23 @@
   .table-scroll thead th::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: var(--axis); }
   table { border-collapse: collapse; width: 100%; font-size: 13px; }
   th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--grid); white-space: nowrap; }
-  th { color: var(--text-secondary); font-weight: 600; cursor: pointer; user-select: none; }
+  th { color: var(--text-secondary); font-weight: 700; cursor: pointer; user-select: none;
+    font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   td.title { white-space: normal; min-width: 200px; }
   tr.out td { color: var(--text-muted); }
-  .tag { font-size: 11px; border: 1px solid var(--axis); border-radius: 999px; padding: 1px 7px; color: var(--text-secondary); }
+  .tag { font-size: 11px; border: 1px solid var(--axis); border-radius: 2px; padding: 1px 6px; color: var(--text-secondary); }
+  .tag.model { border-color: var(--series-yahoo); color: var(--series-yahoo); }
+  .tag.brand { border-color: var(--series-mercari); color: var(--series-mercari); }
 
   .records { list-style: none; margin: 0; padding: 0; }
-  .records li { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--grid); font-size: 13px; }
+  .records li { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px dashed var(--grid); font-size: 13px; }
   .records .q { font-weight: 600; }
   .records .when { color: var(--text-muted); font-size: 12px; }
   .records .val { font-variant-numeric: tabular-nums; }
-  .records .thumb { width: 36px; height: 36px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); flex: none; }
+  .records .thumb { width: 36px; height: 36px; object-fit: cover; border-radius: 2px; border: 1px solid var(--border); flex: none; }
 
-  .banner { border-left: 3px solid var(--warning); padding: 8px 12px; font-size: 13px; color: var(--text-secondary); }
+  .banner { border-left: 4px solid var(--warning); padding: 10px 14px; font-size: 13px; color: var(--text-secondary); }
   .muted { color: var(--text-secondary); }
   footer.note { margin-top: 24px; font-size: 12px; color: var(--text-muted); }
   .version { display: inline-block; margin-left: 6px; opacity: .7; font-variant-numeric: tabular-nums; }
@@ -333,6 +460,17 @@
       <button type="button" class="ghost" id="clear">クリア</button>
     </div>
 
+    <div class="pricetag">
+      <span class="pricetag-k">店頭で見た値段</span>
+      <label class="field">値札の金額
+        <input type="number" id="shop-price" placeholder="例: 4800" min="0" step="100" inputmode="numeric">
+      </label>
+      <label class="field">実物の状態
+        <select id="condition"></select>
+      </label>
+      <p class="hint muted">入れておくと、計算した相場と突き合わせて妥当かどうかを出します。</p>
+    </div>
+
     <div class="panes" id="panes"></div>
 
     <details class="adv" style="margin-top:14px">
@@ -354,6 +492,24 @@
   <div id="messages" hidden></div>
 
   <section class="card" id="summary" hidden>
+    <div id="verdict" hidden>
+      <div class="verdict-head">
+        <span class="verdict-badge" id="verdict-badge">—</span>
+        <div class="verdict-text">
+          <div class="verdict-line" id="verdict-line"></div>
+          <div class="verdict-sub" id="verdict-sub"></div>
+        </div>
+      </div>
+      <ul class="factors" id="factors"></ul>
+      <details class="adv offbook-box">
+        <summary>相場に出てこない材料（必ず実物で見ること）</summary>
+        <ul class="offbook" id="offbook"></ul>
+      </details>
+    </div>
+    <p class="verdict-empty muted" id="verdict-empty" hidden></p>
+
+    <div class="stitch"></div>
+
     <div class="headline">
       <div>
         <div class="hero-label">相場（両サイトの中央値の平均）</div>
@@ -362,6 +518,7 @@
       </div>
       <div class="tiles" id="tiles"></div>
     </div>
+    <p class="basis-note muted" id="basis-note"></p>
     <div class="row" style="margin-top:14px">
       <button type="button" class="ghost" id="save">この結果を保存</button>
       <button type="button" class="ghost" id="csv">CSV</button>
@@ -397,6 +554,7 @@
           <th data-sort="label">入力元</th>
           <th data-sort="title">商品名</th>
           <th data-sort="price" class="num">価格</th>
+          <th data-sort="tier">一致</th>
           <th>状態</th>
         </tr></thead>
         <tbody></tbody>
