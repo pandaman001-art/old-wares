@@ -7,7 +7,11 @@
 // 使わない場合はこれまでどおり ocr.js（Tesseract）が端末内で処理する。
 
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta";
-export const DEFAULT_MODEL = "gemini-2.5-flash";
+
+// モデル名は決め打ちにしない。提供側の都合で古い名前は新規キーに開放されなくなる。
+// 実際に使えるモデルはキーごとに違うので listModels() で問い合わせ、pickBestModel() で選ぶ。
+// これは一覧が取れなかったときの最後の手段でしかない。
+export const FALLBACK_MODEL = "gemini-3.6-flash";
 
 // 送る画像の大きさ。大きすぎても精度は上がらず、通信量と待ち時間が増えるだけ
 const MAX_EDGE = 1400;
@@ -57,6 +61,10 @@ function describeError(status, payload) {
       + "（プロジェクト ID やクライアント シークレットでは動きません）。";
   }
   if (status === 403) return "API キーにこのモデルを使う権限がありません。";
+  if (/no longer available|not found|not supported|is not available/i.test(message)) {
+    return "このモデルは使えなくなっています。「保存して接続を確認」を押して、"
+      + "一覧から別のモデルを選び直してください。";
+  }
   if (status === 429) return "無料枠の上限に達しました。しばらく待つか、端末内の読み取りを使ってください。";
   if (status >= 500) return "相手側のサーバーが混み合っています。少し待って試してください。";
   return `読み取りに失敗しました（${status}）${message ? ": " + message : ""}`;
@@ -79,7 +87,26 @@ async function callApi(path, { apiKey, method = "GET", body, signal }) {
   return payload;
 }
 
-/** キーで使えるモデルのうち、画像を読めるものを新しい順に返す。 */
+/**
+ * 使えるモデルの中から、この用途に向いたものを選ぶ。
+ * タグを読むだけなので速くて安い flash 系を優先し、予告なく消える preview 系は避ける。
+ * 版が新しいほど良いものとして扱う。
+ */
+export function pickBestModel(names) {
+  const rank = (name) => {
+    const version = Number.parseFloat((name.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] ?? "0");
+    const tier = /flash-lite/.test(name) ? 1 : /flash/.test(name) ? 3 : /pro/.test(name) ? 2 : 0;
+    const stable = /preview|exp|latest|thinking/.test(name) ? 0 : 1;
+    return [stable, tier, version];
+  };
+  return [...(names || [])].sort((a, b) => {
+    const [as, at, av] = rank(a);
+    const [bs, bt, bv] = rank(b);
+    return bs - as || bt - at || bv - av || a.localeCompare(b);
+  })[0] || null;
+}
+
+/** キーで使えるモデルのうち、画像を読めるものを返す。 */
 export async function listModels(apiKey) {
   const payload = await callApi("/models", { apiKey });
   return (payload?.models || [])
@@ -137,7 +164,7 @@ export function parseResponse(payload) {
 }
 
 /** 写真を送って、タグに書かれている内容を読み取る。 */
-export async function readTagWithAi(blob, { apiKey, model = DEFAULT_MODEL, signal } = {}) {
+export async function readTagWithAi(blob, { apiKey, model = FALLBACK_MODEL, signal } = {}) {
   if (!apiKey) throw new Error("API キーが設定されていません。");
   const base64 = await toBase64Jpeg(blob);
   const payload = await callApi(`/models/${encodeURIComponent(model)}:generateContent`, {

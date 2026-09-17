@@ -1,6 +1,6 @@
 // 画面の組み立てとイベント配線。
 
-import { DEFAULT_MODEL, listModels, readTagWithAi } from "./ai.js";
+import { FALLBACK_MODEL, listModels, pickBestModel, readTagWithAi } from "./ai.js";
 import { barcodeSupported, describeBarcode, detectFromVideo } from "./barcode.js";
 import { cameraSupported, startCamera, takePhoto } from "./camera.js";
 import { drawHistogram, SERIES_VARS } from "./chart.js";
@@ -14,7 +14,7 @@ import {
 } from "./store.js";
 
 // 更新が届いたかを画面で確認できるようにする。上げるときは sw.js の CACHE も揃えること
-const APP_VERSION = "v10";
+const APP_VERSION = "v11";
 
 const el = (id) => document.getElementById(id);
 const yen = (n) => (n === null || n === undefined ? "—" : "¥" + Number(n).toLocaleString("ja-JP"));
@@ -221,16 +221,18 @@ function refreshAiUi() {
   el("ai-read").hidden = !apiKey;
   el("ai-forget").hidden = !apiKey;
   el("ai-summary").textContent = apiKey
-    ? `AI で読む（設定済み・${model || DEFAULT_MODEL}）`
+    ? `AI で読む（設定済み・${model || FALLBACK_MODEL}）`
     : "AI で読む（任意・API キーが必要）";
   if (apiKey && !el("ai-key").value) el("ai-key").value = apiKey;
   // 取得済みの一覧があればそれを保つ。保存のたびに候補が 1 つへ潰れないように
-  setModelOptions(availableModels, model || DEFAULT_MODEL);
+  setModelOptions(availableModels, model || FALLBACK_MODEL);
 }
 
 function setModelOptions(names, selected) {
   const select = el("ai-model");
-  const options = [...new Set([...names, selected, DEFAULT_MODEL].filter(Boolean))];
+  // 一覧に無いモデルは混ぜない。提供が終わった名前を選べる状態にしておくと、
+  // 読み取りのたびにエラーになる
+  const options = names.length ? [...new Set(names)] : [selected || FALLBACK_MODEL];
   select.innerHTML = options.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
   select.value = options.includes(selected) ? selected : options[0];
 }
@@ -250,11 +252,16 @@ el("ai-save").addEventListener("click", async () => {
     const models = await listModels(apiKey);
     if (!models.length) throw new Error("このキーで使えるモデルが見つかりませんでした。");
     availableModels = models;
-    setModelOptions(models, models.includes(DEFAULT_MODEL) ? DEFAULT_MODEL : models[0]);
+    const saved = aiSettings().model;
+    // 保存済みのモデルがまだ使えるならそれを、駄目ならこの用途に向いたものを選び直す
+    const chosen = models.includes(saved) ? saved : pickBestModel(models);
+    setModelOptions(models, chosen);
     saveAiSettings({ apiKey, model: el("ai-model").value });
     refreshAiUi();
     status.className = "status ok";
-    status.textContent = `使えます。${models.length} 個のモデルが見つかりました。`;
+    status.textContent = saved && saved !== chosen
+      ? `使えます。${saved} は使えないため ${chosen} に切り替えました。`
+      : `使えます。${models.length} 個のモデルから ${chosen} を使います。`;
   } catch (error) {
     status.className = "status bad";
     status.textContent = error.message;
