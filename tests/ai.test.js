@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { buildRequest, DEFAULT_MODEL, parseResponse } from "../js/ai.js";
+import { buildRequest, FALLBACK_MODEL, parseResponse, pickBestModel } from "../js/ai.js";
 
 describe("buildRequest", () => {
   const request = buildRequest("QkFTRTY0");
@@ -87,8 +87,35 @@ describe("parseResponse", () => {
   });
 });
 
-describe("既定のモデル", () => {
-  it("画像を読める flash 系を既定にする", () => {
-    assert.match(DEFAULT_MODEL, /^gemini-.*flash/);
+describe("pickBestModel", () => {
+  it("使えるモデルの中から新しい flash 系を選ぶ", () => {
+    assert.equal(pickBestModel(["gemini-3.6-flash", "gemini-3.6-pro", "gemini-3.1-flash-lite"]), "gemini-3.6-flash");
+  });
+
+  it("版が新しいものを選ぶ", () => {
+    assert.equal(pickBestModel(["gemini-2.5-flash", "gemini-3.6-flash"]), "gemini-3.6-flash");
+  });
+
+  it("preview は避ける（予告なく消えるため）", () => {
+    assert.equal(pickBestModel(["gemini-4.0-flash-preview", "gemini-3.6-pro"]), "gemini-3.6-pro");
+  });
+
+  it("flash が無ければ pro を使う", () => {
+    assert.equal(pickBestModel(["gemini-3.6-pro"]), "gemini-3.6-pro");
+  });
+
+  it("flash-lite より flash を優先する", () => {
+    assert.equal(pickBestModel(["gemini-3.6-flash-lite", "gemini-3.6-flash"]), "gemini-3.6-flash");
+  });
+
+  it("候補が無ければ null", () => {
+    assert.equal(pickBestModel([]), null);
+    assert.equal(pickBestModel(undefined), null);
+  });
+});
+
+describe("最後の手段のモデル名", () => {
+  it("一覧が取れなかったときのために flash 系を持っておく", () => {
+    assert.match(FALLBACK_MODEL, /^gemini-.*flash/);
   });
 });
